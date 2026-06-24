@@ -152,4 +152,22 @@ def build_detection_result(columns: list, final_mapping: dict) -> dict:
         "warnings": warnings,
         "requires_manual_mapping": len(unknown_columns) > 0
     }
+def suggest_file_type(columns_list, sample_values=None):
+    """
+    Suggest the type of financial file based on column names.
+    """
+    cols = [str(c).lower() for c in columns_list]
 
+    if any(x in cols for x in ["vendor", "supplier", "invoice_number"]):
+        return "accounts_payable"
+
+    if any(x in cols for x in ["customer", "client", "sales"]):
+        return "accounts_receivable"
+
+    if any(x in cols for x in ["employee", "salary", "payroll"]):
+        return "payroll"
+
+    if any(x in cols for x in ["account", "debit", "credit", "balance"]):
+        return "general_ledger"
+
+    return "unknown"

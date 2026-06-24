@@ -1,6 +1,11 @@
 import os
 import mysql.connector
+from dotenv import load_dotenv
+import os
+import json
 
+
+load_dotenv()
 # Database connection config. Reads from environment variables with fallback defaults for local development
 DB_CONFIG = {
     "host": os.getenv("db_host"),
@@ -235,7 +240,7 @@ def save_upload(file_id: str, client_id: str, filename: str, file_type: str, row
     cursor = conn.cursor()
     # `rows` is wrapped in backticks because it is a reserved word in MySQL
     cursor.execute(
-        "INSERT INTO uploads (file_id, client_id, filename, file_type, `rows`) VALUES (%s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE file_id = file_id",
+        "INSERT INTO uploads (file_id, client_id, filename, file_type,  row_count) VALUES (%s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE file_id = file_id",
         (file_id, client_id, filename, file_type, rows)
     )
     conn.commit()
@@ -255,3 +260,173 @@ def get_uploads(client_id: str) -> list:
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+# Save a schema fingerprint for a client to avoid re-running LLM detection on the same file structure
+def save_fingerprint(client_id: str, fingerprint: str, file_type: str, columns: list):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS schema_fingerprints (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            client_id VARCHAR(255) NOT NULL,
+            fingerprint VARCHAR(255) NOT NULL,
+            file_type VARCHAR(100) NOT NULL,
+            columns JSON,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_fingerprint (client_id, fingerprint, file_type)
+        )
+    """)
+    cursor.execute("""
+        INSERT INTO schema_fingerprints (client_id, fingerprint, file_type, columns)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE columns = VALUES(columns)
+    """, (client_id, fingerprint, file_type, json.dumps(columns)))
+    conn.commit()
+    conn.close()
+
+# Get a saved schema fingerprint for a client
+def get_fingerprint(client_id: str, fingerprint: str, file_type: str):
+    import json as _json
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("""
+            SELECT * FROM schema_fingerprints
+            WHERE client_id = %s AND fingerprint = %s AND file_type = %s
+        """, (client_id, fingerprint, file_type))
+        return cursor.fetchone()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+# Save cleaning acknowledgments (issues the auditor has accepted/dismissed)
+def save_cleaning_acknowledgment(issue_id: str, file_id: str, client_id: str, file_type: str, issue: dict, acknowledged_by: str = None):
+    import json as _json
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cleaning_acknowledgments (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            issue_id VARCHAR(255) NOT NULL,
+            file_id VARCHAR(255) NOT NULL,
+            client_id VARCHAR(255) NOT NULL,
+            file_type VARCHAR(100) NOT NULL,
+            issue JSON,
+            acknowledged_by VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_acknowledgment (issue_id, file_id, client_id, file_type)
+        )
+    """)
+    cursor.execute("""
+        INSERT INTO cleaning_acknowledgments (issue_id, file_id, client_id, file_type, issue, acknowledged_by)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE acknowledged_by = VALUES(acknowledged_by)
+    """, (issue_id, file_id, client_id, file_type, _json.dumps(issue), acknowledged_by))
+    conn.commit()
+    conn.close()
+
+# Get all acknowledged issue IDs for a file
+def get_acknowledged_issue_ids(file_id: str, client_id: str, file_type: str) -> set:
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("""
+            SELECT issue_id FROM cleaning_acknowledgments
+            WHERE file_id = %s AND client_id = %s AND file_type = %s
+        """, (file_id, client_id, file_type))
+        return {row["issue_id"] for row in cursor.fetchall()}
+    except Exception:
+        return set()
+    finally:
+        conn.close()
+
+# Save inline corrections made by the auditor
+def save_cleaning_corrections(file_id: str, client_id: str, file_type: str, corrections: list, corrected_by: str = None):
+    import json as _json
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cleaning_corrections (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            file_id VARCHAR(255) NOT NULL,
+            client_id VARCHAR(255) NOT NULL,
+            file_type VARCHAR(100) NOT NULL,
+            corrections JSON NOT NULL,
+            corrected_by VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        INSERT INTO cleaning_corrections (file_id, client_id, file_type, corrections, corrected_by)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (file_id, client_id, file_type, _json.dumps(corrections), corrected_by))
+    conn.commit()
+    conn.close()
+
+# Get all corrections for a file merged into a single list
+def get_cleaning_corrections(file_id: str, client_id: str, file_type: str) -> list:
+    import json as _json
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("""
+            SELECT corrections FROM cleaning_corrections
+            WHERE file_id = %s AND client_id = %s AND file_type = %s
+            ORDER BY created_at ASC
+        """, (file_id, client_id, file_type))
+        all_corrections = []
+        for row in cursor.fetchall():
+            try:
+                batch = _json.loads(row["corrections"]) if isinstance(row["corrections"], str) else row["corrections"]
+                all_corrections.extend(batch)
+            except Exception:
+                pass
+        return all_corrections
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+# Save a snapshot of the cleaned dataframe for diff comparison when auditor uploads corrected Excel
+def save_cleaning_snapshot(file_id: str, client_id: str, file_type: str, cleaned_df):
+    import json as _json
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cleaning_snapshots (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            file_id VARCHAR(255) NOT NULL,
+            client_id VARCHAR(255) NOT NULL,
+            file_type VARCHAR(100) NOT NULL,
+            snapshot JSON NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_snapshot (file_id, client_id, file_type)
+        )
+    """)
+    snapshot = cleaned_df.fillna("").astype(str).to_dict(orient="records")
+    cursor.execute("""
+        INSERT INTO cleaning_snapshots (file_id, client_id, file_type, snapshot)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE snapshot = VALUES(snapshot), created_at = CURRENT_TIMESTAMP
+    """, (file_id, client_id, file_type, _json.dumps(snapshot)))
+    conn.commit()
+    conn.close()
+
+# Get a previously saved cleaning snapshot
+def get_cleaning_snapshot(file_id: str, client_id: str, file_type: str):
+    import json as _json
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("""
+            SELECT snapshot FROM cleaning_snapshots
+            WHERE file_id = %s AND client_id = %s AND file_type = %s
+        """, (file_id, client_id, file_type))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _json.loads(row["snapshot"]) if isinstance(row["snapshot"], str) else row["snapshot"]
+    except Exception:
+        return None
+    finally:
+        conn.close()
