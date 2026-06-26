@@ -21,7 +21,14 @@ from dotenv import load_dotenv
 from detector import detect_columns_with_llm, build_detection_result, suggest_file_type
 from database import (
     init_db, get_db, save_mapping, get_mapping, save_upload, get_uploads,
+    save_cleaning_acknowledgment, get_acknowledged_issue_ids,
+    save_cleaning_corrections, get_cleaning_corrections,
+    save_fingerprint, get_fingerprint,
+    save_cleaning_snapshot, get_cleaning_snapshot,
 )
+from cleaner import clean_dataframe
+from excel_export import build_cleaning_workbook
+from excel_diff import diff_uploaded_against_snapshot
 
 load_dotenv()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,12 +36,10 @@ BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 if BACKEND_DIR not in sys.path:
     sys.path.append(BACKEND_DIR)
 
-app = FastAPI(title="AuditIQ API", debug=True)
-
+app = FastAPI(title="AuditAI API Running!", debug=True)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -43,7 +48,7 @@ app.add_middleware(
 async def startup_event():
     init_db()
 
-SECRET_KEY = os.getenv("SECRET_KEY", "auditiq-secret-key-change-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 8
 pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
@@ -52,7 +57,15 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls", "pdf", "docx"}
 
-# ── HELPERS ───────────────────────────────────────────────────────────────────
+# Internal columns the system adds for its own bookkeeping (row tracking for the
+# corrected-Excel diff flow, duplicate-row marking during cleaning) that should
+# never be treated as real data and should never reach column detection or mapping.
+# These only end up "visible" as real columns if someone uploads an already-exported/
+# cleaned workbook through the normal upload flow instead of "Upload Corrected File" —
+# the corrected-Excel flow already knows to strip these by name, but the normal
+# upload flow has no equivalent protection without this filter.
+RESERVED_INTERNAL_COLUMNS = {"_row_id", "_is_duplicate"}
+
 def hash_password(password: str):
     return pwd_context.hash(password)
 
@@ -121,6 +134,10 @@ def read_file_to_df(save_path: str, ext: str):
         df = df.dropna(axis=1, how='all')
         df = df.loc[:, ~(df == '').all()]
         df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
+        # Drop any reserved internal column (e.g. _row_id from a previously
+        # exported workbook re-uploaded by mistake) before it's ever treated as
+        # real data — see RESERVED_INTERNAL_COLUMNS for why this exists.
+        df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
     return df
 
 def calculate_fill_rates(df: pd.DataFrame) -> dict:
@@ -143,11 +160,21 @@ def locate_uploaded_file(file_id: str):
             return path, extension
     return None, None
 
+def normalize_header_label(value) -> str:
+    label = str(value or "").strip()
+    if label.startswith("[UNRESOLVED]"):
+        label = label.replace("[UNRESOLVED]", "", 1).strip()
+    return label
+
 def issue_fingerprint(file_id: str, client_id: str, file_type: str, issue: dict) -> str:
     raw = "|".join([
-        str(file_id), str(client_id), str(file_type),
-        str(issue.get("row_index", "")), str(issue.get("column", "")),
-        str(issue.get("original_value", "")), str(issue.get("issue", "")),
+        str(file_id),
+        str(client_id),
+        str(file_type),
+        str(issue.get("row_index", "")),
+        str(issue.get("column", "")),
+        str(issue.get("original_value", "")),
+        str(issue.get("issue", "")),
     ])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -160,15 +187,33 @@ def enrich_issues_with_ids(report: dict, file_id: str, client_id: str, file_type
 def rebuild_report_counts(report: dict) -> dict:
     issues = report.get("issues", [])
     total_rows = report.get("total_rows", 0)
+
+    row_issues = [
+        i for i in issues
+        if i.get("row_index") not in ("N/A", None)
+    ]
+
+    column_issues = [
+        i for i in issues
+        if i.get("row_index") in ("N/A", None)
+    ]
+
     flagged_rows = len(set(
-        issue.get("row_index") for issue in issues if issue.get("row_index") != "N/A"
+    i.get("row_index") for i in row_issues
+    if i.get("row_index") not in (None, "N/A")
     ))
+
     report["flagged_rows"] = flagged_rows
-    report["clean_rows"] = max(total_rows - flagged_rows, 0)
+    report["clean_rows"] = total_rows - flagged_rows
+
+    report["row_issues"] = len(row_issues)
+    report["column_issues"] = len(column_issues)
+
     report["total_issues"] = len(issues)
     report["high_issues"] = len([i for i in issues if i.get("severity") == "high"])
     report["medium_issues"] = len([i for i in issues if i.get("severity") == "medium"])
     report["info_issues"] = len([i for i in issues if i.get("severity") == "info"])
+
     return report
 
 def filter_acknowledged_issues(report: dict, file_id: str, client_id: str, file_type: str) -> dict:
@@ -182,36 +227,52 @@ def filter_acknowledged_issues(report: dict, file_id: str, client_id: str, file_
     return rebuild_report_counts(report)
 
 def apply_saved_corrections(df: pd.DataFrame, mapping: dict, corrections: list) -> pd.DataFrame:
+    """
+    Apply every saved correction to the source dataframe before cleaning runs.
+    Handles cell-value corrections, row deletions (column_name == "_row_deleted"),
+    and column deletions (column_name starts with "_column_deleted:"). Deletions are
+    applied first so they persist on every future cleaning run, not just one response.
+    """
     if not corrections:
         return df
+
     standard_to_original = {
         info.get("mapped_to"): original_col
         for original_col, info in mapping.items()
         if isinstance(info, dict) and info.get("mapped_to") not in ("", "unknown", None)
     }
+
     rows_to_drop = []
     columns_to_drop = []
     value_corrections = []
+
     for correction in corrections:
         col = correction.get("column_name", correction.get("column"))
         if col == "_row_deleted":
             rows_to_drop.append(int(correction["row_index"]))
         elif col and str(col).startswith("_column_deleted:"):
-            columns_to_drop.append(col.split(":", 1)[1])
+            original_col_name = col.split(":", 1)[1]
+            columns_to_drop.append(original_col_name)
         else:
             value_corrections.append(correction)
+
     if rows_to_drop:
         df = df.drop(index=[r for r in rows_to_drop if r in df.index])
     if columns_to_drop:
-        resolved = []
+        # Translate standard mapped names back to original column names
+        # because df still has original names at this point (before rename_columns runs)
+        resolved_columns_to_drop = []
         for col_name in columns_to_drop:
+            # Check if it's already an original column name
             if col_name in df.columns:
-                resolved.append(col_name)
+                resolved_columns_to_drop.append(col_name)
             else:
+                # Look up the original name from the mapping
                 original = standard_to_original.get(col_name)
                 if original and original in df.columns:
-                    resolved.append(original)
-        df = df.drop(columns=resolved)
+                    resolved_columns_to_drop.append(original)
+        df = df.drop(columns=resolved_columns_to_drop)
+
     for correction in value_corrections:
         row_index = int(correction["row_index"])
         issue_col = correction.get("column_name", correction.get("column"))
@@ -219,6 +280,22 @@ def apply_saved_corrections(df: pd.DataFrame, mapping: dict, corrections: list) 
         if source_col in df.columns and row_index in df.index:
             df.at[row_index, source_col] = correction["corrected_value"]
     return df
+
+def adapt_mapping_to_uploaded_headers(mapping: dict, columns: list) -> dict:
+    adapted = {}
+    column_set = set(columns)
+    for original_col, info in mapping.items():
+        if not isinstance(info, dict):
+            adapted[original_col] = info
+            continue
+        mapped_to = info.get("mapped_to")
+        if original_col in column_set:
+            adapted[original_col] = info
+        elif mapped_to and mapped_to != "unknown" and mapped_to in column_set:
+            adapted[mapped_to] = {**info, "mapped_to": mapped_to}
+        else:
+            adapted[original_col] = info
+    return adapted
 
 def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: dict):
     save_path, file_ext = locate_uploaded_file(file_id)
@@ -230,6 +307,7 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
             raise HTTPException(status_code=400, detail="Could not read file.")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
+
     corrections = get_cleaning_corrections(file_id, client_id, file_type)
     df = apply_saved_corrections(df, mapping, corrections)
     fill_rates = calculate_fill_rates(df)
@@ -238,7 +316,24 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cleaning failed: {str(e)}")
     report = enrich_issues_with_ids(report, file_id, client_id, file_type)
+
+    # IMPORTANT: remove acknowledged FIRST
     report = filter_acknowledged_issues(report, file_id, client_id, file_type)
+
+    # recompute counts AFTER filtering
+    report = rebuild_report_counts(report)
+
+    # SINGLE SOURCE OF TRUTH for can_proceed: every severity (high, medium, AND
+    # info) must be resolved before proceeding. info-severity issues (currently
+    # just ambiguous-date warnings) still require an explicit action — either
+    # "Correct as-is" (acknowledge-issue, filtered out above) or an actual cell
+    # edit (which changes original_value, so the issue won't reappear on the
+    # next clean cycle) — they are NOT silently exempt. This prevents an
+    # auditor from clearing only the high/medium issues and proceeding without
+    # ever having looked at an ambiguous date. Every endpoint below reads this
+    # single value instead of recomputing it differently.
+    report["can_proceed"] = report["total_issues"] == 0
+
     return cleaned_df, report
 
 # ── MODELS ────────────────────────────────────────────────────────────────────
@@ -325,47 +420,58 @@ class Notification(BaseModel):
     message: str
     type: Optional[str] = "engagement_alert"
 
-# ── AI PIPELINE ROUTES ────────────────────────────────────────────────────────
 @app.get("/")
 def root():
     return {"message": "Audit AI API is running"}
 
 @app.post("/upload")
-async def upload_file_ai(file: UploadFile = File(...), client_id: str = Form(...)):
+async def upload_file_ai(
+    file: UploadFile = File(...),
+    client_id: str = Form(...)
+):
     ext = get_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=415, detail=f"File type .{ext} not supported.")
+        raise HTTPException(status_code=415, detail=f"File type .{ext} not supported. Upload Excel, CSV, PDF or DOCX file only.")
+    MAX_FILE_SIZE = 50
     file_bytes = await file.read()
-    if len(file_bytes) / (1024 * 1024) > 50:
-        raise HTTPException(status_code=413, detail="File size exceeds 50MB limit.")
+    file_size_mb = len(file_bytes) / (1024 * 1024)
+    if file_size_mb > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail=f"File size exceeds the maximum limit of {MAX_FILE_SIZE} MB. Uploaded file size: {file_size_mb:.2f} MB.")
     file.file.seek(0)
     file_id = str(uuid.uuid4())
     save_path = os.path.join(UPLOAD_DIR, f"{file_id}.{ext}")
     with open(save_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
     if ext == "pdf":
         df, source = extract_pdf(save_path)
         if df is None:
-            raise HTTPException(status_code=400, detail="Could not extract content from PDF.")
+            raise HTTPException(status_code=400, detail="Could not extract any content from PDF.")
         save_upload(file_id, client_id, file.filename, ext, len(df))
         fill_rates = calculate_fill_rates(df)
         return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": source,
                 "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
-                "preview": df.head(5).fillna("").to_dict(orient="records"), "message": f"PDF uploaded via {source}"}
+                "preview": df.head(5).fillna("").to_dict(orient="records"), "message": f"PDF uploaded — extracted via {source}"}
+
     if ext == "docx":
         df, source = extract_docx(save_path)
         if df is None:
-            raise HTTPException(status_code=400, detail="Could not extract content from DOCX.")
+            raise HTTPException(status_code=400, detail="Could not extract any content from DOCX.")
         save_upload(file_id, client_id, file.filename, ext, len(df))
         fill_rates = calculate_fill_rates(df)
         return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": source,
                 "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
-                "preview": df.head(5).fillna("").to_dict(orient="records"), "message": f"DOCX uploaded via {source}"}
+                "preview": df.head(5).fillna("").to_dict(orient="records"), "message": f"DOCX uploaded — extracted via {source}"}
+
     try:
         df = pd.read_csv(save_path, dtype=str) if ext == "csv" else pd.read_excel(save_path, dtype=str)
         df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
         df = df.dropna(axis=1, how='all')
         df = df.loc[:, ~(df == '').all()]
+        # Drop any reserved internal column (e.g. _row_id from a previously
+        # exported workbook re-uploaded by mistake through the normal upload
+        # flow) before it's ever surfaced for column detection.
+        df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
     save_upload(file_id, client_id, file.filename, ext, len(df))
@@ -373,24 +479,38 @@ async def upload_file_ai(file: UploadFile = File(...), client_id: str = Form(...
     return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": "table",
             "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
             "fingerprint": compute_schema_fingerprint(list(df.columns)),
-            "preview": df.head(5).fillna("").to_dict(orient="records"), "message": "File uploaded successfully"}
+            "preview": df.head(5).fillna("").to_dict(orient="records"), "message": "File uploaded and processed successfully"}
 
 @app.post("/detect-columns")
 async def detect_columns_endpoint(
-    client_id: str = Form(...), file_id: str = Form(...), columns: str = Form(...),
-    file_type: str = Form("general"), fill_rates: str = Form("{}"), fingerprint: str = Form("")
+    client_id: str = Form(...),
+    file_id: str = Form(...),
+    columns: str = Form(...),
+    file_type: str = Form("general"),
+    fill_rates: str = Form("{}"),
+    fingerprint: str = Form("")
 ):
     try:
         columns_list = json.loads(columns)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid columns format.")
+
     try:
         fill_rates_dict = json.loads(fill_rates)
     except json.JSONDecodeError:
         fill_rates_dict = {}
-    save_path, file_ext = locate_uploaded_file(file_id)
+
+    save_path = None
+    file_ext = None
+    for extension in ALLOWED_EXTENSIONS:
+        path = os.path.join(UPLOAD_DIR, f"{file_id}.{extension}")
+        if os.path.exists(path):
+            save_path = path
+            file_ext = extension
+            break
     if not save_path:
-        raise HTTPException(status_code=404, detail="File not found.")
+        raise HTTPException(status_code=404, detail="File not found. Please upload the file first.")
+
     try:
         df = read_file_to_df(save_path, file_ext)
         if df is None:
@@ -404,67 +524,144 @@ async def detect_columns_endpoint(
                 sample_values[col] = ""
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
+
     try:
         file_type_suggestion = suggest_file_type(columns_list, sample_values)
     except Exception:
         file_type_suggestion = {"file_type": "other", "file_type_label": "Other"}
+
     effective_file_type = file_type_suggestion["file_type"]
+
     computed_fingerprint = compute_schema_fingerprint(columns_list)
     save_fingerprint(client_id, computed_fingerprint, effective_file_type, columns_list)
+
     saved_mapping = get_mapping(client_id, effective_file_type)
     existing_fp = get_fingerprint(client_id, computed_fingerprint, effective_file_type)
+
     if existing_fp and saved_mapping:
-        filtered_mapping = {col: saved_mapping.get(col) for col in columns_list if col in saved_mapping}
-        result = build_detection_result(columns_list, filtered_mapping, sample_values, fill_rates_dict)
-        result.update({"file_id": file_id, "source": "fingerprint_cache",
-                       "suggested_file_type": effective_file_type,
-                       "suggested_file_type_label": file_type_suggestion["file_type_label"]})
-        return result
+        filtered_mapping = {
+            col: saved_mapping.get(col)
+            for col in columns_list
+            if col in saved_mapping
+        }
+        # Require that EVERY uploaded column actually matched something in the saved
+        # mapping before trusting this as a real cache hit. A fingerprint match alone
+        # isn't enough proof — it's possible for this exact fingerprint to have been
+        # seen before (e.g. from an earlier accidental upload of an already-cleaned/
+        # exported file) while the saved MAPPING is still keyed by a completely
+        # different set of column names (the original raw headers). In that case
+        # filtered_mapping would be empty or only partially filled, and returning it
+        # as-is silently produces a mapping table with missing or zero rows instead
+        # of a real detection result. Falling through to full LLM detection below is
+        # the safe behavior whenever the match isn't complete.
+        if filtered_mapping and len(filtered_mapping) == len(columns_list):
+            result = build_detection_result(columns_list, filtered_mapping, sample_values, fill_rates_dict)
+            result["file_id"] = file_id
+            result["source"] = "fingerprint_cache"
+            result["message"] = "Mapping reused from cache."
+            result["suggested_file_type"] = file_type_suggestion["file_type"]
+            result["suggested_file_type_label"] = file_type_suggestion["file_type_label"]
+            return result
+
     if saved_mapping:
-        if all(col in saved_mapping for col in columns_list):
+        all_mapped = all(col in saved_mapping for col in columns_list)
+        if all_mapped:
             filtered_mapping = {col: saved_mapping[col] for col in columns_list}
             result = build_detection_result(columns_list, filtered_mapping, sample_values, fill_rates_dict)
-            result.update({"file_id": file_id, "source": "saved_mapping",
-                           "suggested_file_type": effective_file_type,
-                           "suggested_file_type_label": file_type_suggestion["file_type_label"]})
+            result["file_id"] = file_id
+            result["source"] = "saved_mapping"
+            result["message"] = "Mapping loaded from saved client profile — LLM skipped."
+            result["suggested_file_type"] = file_type_suggestion["file_type"]
+            result["suggested_file_type_label"] = file_type_suggestion["file_type_label"]
             return result
+
     try:
         mapping = detect_columns_with_llm(columns_list, sample_values, fill_rates_dict)
         if not mapping:
             raise HTTPException(status_code=500, detail="LLM returned empty mapping.")
+
         result = build_detection_result(columns_list, mapping, sample_values, fill_rates_dict)
+
+        dedup_warnings = []
+        seen_targets = set()
+        for original_col, info in list(result["mapping"].items()):
+            if not isinstance(info, dict):
+                continue
+            target = str(info.get("mapped_to", "")).strip()
+            if target in ("", "unknown"):
+                continue
+            if target in seen_targets:
+                suggestion = target
+                result["mapping"][original_col] = {
+                    "mapped_to": "unknown",
+                    "field_type": "unknown",
+                    "suggestion": suggestion,
+                    "sample_value": info.get("sample_value", ""),
+                    "fill_rate": info.get("fill_rate", 1.0),
+                }
+                dedup_warnings.append(
+                    f"'{original_col}' was also mapped to '{target}' — demoted to unknown. "
+                    f"Please give it a unique 'Mapped To' name."
+                )
+            else:
+                seen_targets.add(target)
+
+        unknown_columns = [
+            col for col, info in result["mapping"].items()
+            if info.get("mapped_to") == "unknown" or info.get("field_type") == "unknown"
+        ]
+        result["unknown_count"] = len(unknown_columns)
+        result["requires_manual_mapping"] = len(unknown_columns) > 0
+        if dedup_warnings:
+            if "warnings" in result and isinstance(result["warnings"], list):
+                result["warnings"].extend(
+                    {"type": "dedup_mapping", "message": w, "action": "Please update the mapped-to field to a unique name."}
+                    for w in dedup_warnings
+                )
+            else:
+                result["warnings"] = [
+                    {"type": "dedup_mapping", "message": w, "action": "Please update the mapped-to field to a unique name."}
+                    for w in dedup_warnings
+                ]
+        if result.get("warnings"):
+            result["warning_count"] = len(result["warnings"])
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Detection failed: {str(e)}")
-    result.update({"file_id": file_id, "source": "llm_detection",
-                   "suggested_file_type": effective_file_type,
-                   "suggested_file_type_label": file_type_suggestion["file_type_label"]})
+
+    result["file_id"] = file_id
+    result["source"] = "llm_detection"
+    result["suggested_file_type"] = file_type_suggestion["file_type"]
+    result["suggested_file_type_label"] = file_type_suggestion["file_type_label"]
     return result
 
 @app.post("/save-mapping")
 async def save_mapping_endpoint(
-    client_id: str = Form(...), file_type: str = Form(...),
-    mapping: str = Form(...), confirmed_by: str = Form(None)
+    client_id: str = Form(...),
+    file_type: str = Form(...),
+    mapping: str = Form(...),
+    confirmed_by: str = Form(None)
 ):
     try:
         mapping_dict = json.loads(mapping)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid mapping format.")
     if not mapping_dict:
-        raise HTTPException(status_code=400, detail="Mapping cannot be empty.")
+        raise HTTPException(status_code=400, detail="Mapping cannot be empty. Please provide a valid mapping.")
     save_mapping(client_id, file_type, mapping_dict, confirmed_by)
     return {"client_id": client_id, "file_type": file_type, "columns_saved": len(mapping_dict),
-            "message": f"Mapping saved for client {client_id}."}
+            "message": f"Mapping saved successfully for client {client_id} and file type {file_type}."}
 
 @app.get("/get-mapping/{client_id}")
 async def get_mapping_endpoint(client_id: str, file_type: str = "general"):
     mapping = get_mapping(client_id, file_type)
     if not mapping:
         return {"client_id": client_id, "file_type": file_type, "mapping": {},
-                "message": "No saved mapping found."}
+                "message": "No saved mapping found for this client."}
     return {"client_id": client_id, "file_type": file_type, "mapping": mapping,
-            "columns_mapped": len(mapping), "message": "Mapping retrieved successfully."}
+            "columns_mapped": len(mapping), "message": "Saved mapping retrieved successfully."}
 
 @app.get("/uploads/{client_id}")
 async def get_uploads_endpoint(client_id: str):
@@ -473,83 +670,236 @@ async def get_uploads_endpoint(client_id: str):
 
 @app.post("/clean")
 async def clean_file(
-    file_id: str = Form(...), client_id: str = Form(...), file_type: str = Form("general")
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general")
 ) -> dict:
     mapping = get_mapping(client_id, file_type)
     if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found.")
+        raise HTTPException(status_code=400, detail="No saved mapping found for this client. Please detect the columns and confirm the mapping first.")
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     return {"file_id": file_id, "client_id": client_id, "file_type": file_type,
             "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
-            "validation_report": report, "can_proceed": report.get("total_issues", 0) == 0,
+            "validation_report": report,
+            "can_proceed": report.get("can_proceed", False),
             "message": "File cleaned successfully."}
 
 @app.get("/clean/export-cleaned/{file_id}")
 async def export_cleaned_workbook(file_id: str, client_id: str, file_type: str = "general"):
     mapping = get_mapping(client_id, file_type)
     if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found.")
+        raise HTTPException(status_code=400, detail="No saved mapping found for this client. Please detect the columns and confirm the mapping first.")
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     save_cleaning_snapshot(file_id, client_id, file_type, cleaned_df)
     workbook_buffer = build_cleaning_workbook(cleaned_df, report, mapping)
-    return StreamingResponse(workbook_buffer,
+    download_filename = f"{file_id}_cleaned_data.xlsx"
+    return StreamingResponse(
+        workbook_buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{file_id}_cleaned_data.xlsx"'})
+        headers={"Content-Disposition": f'attachment; filename="{download_filename}"'}
+    )
 
 @app.post("/clean/submit-corrected-excel")
 async def submit_corrected_excel(
-    file: UploadFile = File(...), file_id: str = Form(...),
-    client_id: str = Form(...), file_type: str = Form("general"), corrected_by: str = Form(None),
+    file: UploadFile = File(...),
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general"),
+    corrected_by: str = Form(None),
 ):
     mapping = get_mapping(client_id, file_type)
     if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found.")
+        raise HTTPException(status_code=400, detail="No saved mapping found for this client. Please detect the columns and confirm the mapping first.")
+
     snapshot_rows = get_cleaning_snapshot(file_id, client_id, file_type)
     if not snapshot_rows:
-        raise HTTPException(status_code=400, detail="No downloaded snapshot found. Please download the cleaned Excel first.")
+        raise HTTPException(
+            status_code=400,
+            detail="No downloaded snapshot found for this file. Please download the cleaned Excel first, edit it, then upload it back."
+        )
+
     temp_path = os.path.join(UPLOAD_DIR, f"corrected_{uuid.uuid4()}.xlsx")
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
     try:
         diff_result = diff_uploaded_against_snapshot(temp_path, snapshot_rows)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:
+        # Clean up the temp file, but never let a cleanup failure crash the request.
+        # On Windows, openpyxl can briefly hold a file handle even after close() in some
+        # edge cases (antivirus scanning, OS-level delays) — a delete failure here should
+        # not lose the auditor's corrections, which by this point may already be processed.
         try:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
         except (PermissionError, OSError):
             pass
+
     corrections = diff_result["corrections"]
     deleted_row_ids = diff_result["deleted_row_ids"]
     deleted_columns = diff_result["deleted_columns"]
-    if not corrections and not deleted_row_ids and not deleted_columns:
-        raise HTTPException(status_code=400, detail="No changes detected in uploaded file.")
+    renamed_columns = diff_result["renamed_columns"]
+    ambiguous_changes = diff_result["ambiguous_changes"]
+
+    # More than one column's identity changed at once (more than one name missing
+    # and/or more than one name added). We don't guess which old name maps to which
+    # new name in this case — doing so by position previously misattributed renames
+    # to completely unrelated columns whenever the schema had drifted between the
+    # snapshot and this upload (e.g. resolving a column elsewhere introduced a new
+    # derived field). Ask for a fresh workbook instead of risking silent data loss.
+    if ambiguous_changes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Multiple column changes were detected at once, so the exact rename(s) "
+                "couldn't be determined safely. This usually happens when the downloaded "
+                "workbook is out of date relative to the current data (for example, if "
+                "another correction round already changed the columns since this file was "
+                "downloaded). Please download a fresh copy of the workbook, reapply your "
+                "edits there, and upload that instead."
+            )
+        )
+
+    # A single, unambiguous rename was detected. Before applying it, make sure the new
+    # name doesn't collide with a `mapped_to` value already used by a DIFFERENT column —
+    # that would create two columns sharing one name after rename_columns runs, which
+    # crashes deep inside cleaning (the exact problem detect_duplicate_mappings guards
+    # against for the initial mapping). Reject clearly here instead of letting that happen.
+    if renamed_columns:
+        old_name, new_name = next(iter(renamed_columns.items()))
+        colliding_column = next(
+            (
+                original_col for original_col, info in mapping.items()
+                if original_col != old_name
+                and isinstance(info, dict)
+                and info.get("mapped_to") == new_name
+            ),
+            None,
+        )
+        if colliding_column:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot rename '{old_name}' to '{new_name}': that name is already used "
+                    f"by column '{colliding_column}'. Please choose a different name for "
+                    f"one of these two columns and re-upload."
+                )
+            )
+
+    if not corrections and not deleted_row_ids and not deleted_columns and not renamed_columns:
+        raise HTTPException(
+            status_code=400,
+            detail="No changes were detected in the uploaded file compared to what was downloaded."
+        )
+
     if corrections:
         save_cleaning_corrections(file_id, client_id, file_type, corrections, corrected_by)
+
     if deleted_row_ids:
-        save_cleaning_corrections(file_id, client_id, file_type,
-            [{"row_index": r, "column": "_row_deleted", "original_value": "present", "corrected_value": "deleted_by_auditor"}
-             for r in deleted_row_ids], corrected_by)
+        deletion_records = [
+            {"row_index": row_id, "column": "_row_deleted",
+             "original_value": "present", "corrected_value": "deleted_by_auditor"}
+            for row_id in deleted_row_ids
+        ]
+        save_cleaning_corrections(file_id, client_id, file_type, deletion_records, corrected_by)
+
     if deleted_columns:
-        save_cleaning_corrections(file_id, client_id, file_type,
-            [{"row_index": -1, "column": f"_column_deleted:{col}", "original_value": "present", "corrected_value": "deleted_by_auditor"}
-             for col in deleted_columns], corrected_by)
+        column_deletion_records = [
+            {"row_index": -1, "column": f"_column_deleted:{col}",
+             "original_value": "present", "corrected_value": "deleted_by_auditor"}
+            for col in deleted_columns
+        ]
+        save_cleaning_corrections(file_id, client_id, file_type, column_deletion_records, corrected_by)
+
+    # Apply the rename directly to the saved mapping — same treatment whether the
+    # column was previously "unknown" or already fully resolved. The auditor typing a
+    # new header in Excel is the same deliberate action either way, and we've already
+    # confirmed above it's unambiguous and collision-free, so there's no need to gate
+    # it further or route it through a separate mapping screen.
+    #
+    # IMPORTANT: `old_name` from the diff is the CLEANED-DATA column name the auditor
+    # saw in the workbook — for an unresolved column that's still its original raw
+    # name (e.g. "DEPARTMENT"), but for an ALREADY-RESOLVED column it's the `mapped_to`
+    # value (e.g. "department"), NOT the mapping dict's key (e.g. "dept"). Naively doing
+    # `mapping[old_name] = ...` for a resolved column creates a bogus new entry under a
+    # key that never existed in the source file, while leaving the real entry untouched
+    # — silently failing to apply the rename at all. We must look up which original
+    # column currently has mapped_to == old_name first.
+    if renamed_columns:
+        old_name, new_name = next(iter(renamed_columns.items()))
+
+        original_key = next(
+            (oc for oc, info in mapping.items()
+             if isinstance(info, dict) and info.get("mapped_to") == old_name),
+            None,
+        )
+        if original_key is None:
+            # Not found as a mapped_to value anywhere — this means old_name IS itself
+            # the original raw column key (the unresolved-column case, where mapped_to
+            # was "unknown" and the column kept its original name throughout cleaning).
+            original_key = old_name
+
+        updated_mapping = dict(mapping)
+        existing_info = updated_mapping.get(original_key, {})
+        updated_mapping[original_key] = {
+            **(existing_info if isinstance(existing_info, dict) else {}),
+            "mapped_to": new_name,
+            # Keep the existing field_type if one was already set (e.g. this column was
+            # already resolved as text/date/numeric) — a rename alone doesn't change what
+            # kind of data is in the column. Only default to "text" if it was genuinely
+            # unset/unknown, since the auditor didn't get to pick a type through this path.
+            "field_type": (
+                existing_info.get("field_type")
+                if isinstance(existing_info, dict) and existing_info.get("field_type") not in (None, "unknown")
+                else "text"
+            ),
+        }
+        save_mapping(client_id, file_type, updated_mapping, corrected_by)
+        mapping = updated_mapping
+
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
-    return {"file_id": file_id, "client_id": client_id, "file_type": file_type,
-            "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
-            "validation_report": report, "can_proceed": report.get("total_issues", 0) == 0,
-            "corrections_applied": len(corrections), "rows_deleted": deleted_row_ids,
-            "columns_deleted": deleted_columns, "message": "File re-cleaned successfully."}
+    # Refresh the snapshot so the NEXT diff round compares against today's actual
+    # state, not an increasingly stale baseline — this is what keeps future renames
+    # and corrections unambiguous instead of drifting into ambiguous_changes territory.
+    save_cleaning_snapshot(file_id, client_id, file_type, cleaned_df)
+
+    rename_summary = (
+        f", column '{next(iter(renamed_columns.keys()))}' renamed to "
+        f"'{next(iter(renamed_columns.values()))}' in the mapping"
+        if renamed_columns else ""
+    )
+
+    return {
+        "file_id": file_id,
+        "client_id": client_id,
+        "file_type": file_type,
+        "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
+        "validation_report": report,
+        "can_proceed": report.get("can_proceed", False),
+        "corrections_applied": len(corrections),
+        "rows_deleted": deleted_row_ids,
+        "columns_deleted": deleted_columns,
+        "columns_renamed": renamed_columns,
+        "message": (
+            f"{len(corrections)} correction(s), {len(deleted_row_ids)} row deletion(s), "
+            f"and {len(deleted_columns)} column deletion(s) applied from the uploaded file"
+            f"{rename_summary}. File re-cleaned successfully."
+        )
+    }
 
 @app.post("/clean/acknowledge-issue")
 async def acknowledge_issue_endpoint(
-    file_id: str = Form(...), client_id: str = Form(...), file_type: str = Form("general"),
-    issue: str = Form(...), acknowledged_by: str = Form(None),
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general"),
+    issue: str = Form(...),
+    acknowledged_by: str = Form(None),
 ):
     mapping = get_mapping(client_id, file_type)
     if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found.")
+        raise HTTPException(status_code=400, detail="No saved mapping found for this client.")
     try:
         issue_dict = json.loads(issue)
     except json.JSONDecodeError:
@@ -557,19 +907,25 @@ async def acknowledge_issue_endpoint(
     issue_id = issue_dict.get("issue_id") or issue_fingerprint(file_id, client_id, file_type, issue_dict)
     save_cleaning_acknowledgment(issue_id, file_id, client_id, file_type, issue_dict, acknowledged_by)
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
-    return {"file_id": file_id, "client_id": client_id, "file_type": file_type,
-            "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
-            "validation_report": report, "can_proceed": report.get("total_issues", 0) == 0,
-            "message": "Issue acknowledged."}
+    return {
+        "file_id": file_id, "client_id": client_id, "file_type": file_type,
+        "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
+        "validation_report": report,
+        "can_proceed": report.get("can_proceed", False),
+        "message": "Issue acknowledged."
+    }
 
 @app.post("/clean/submit-inline-corrections")
 async def submit_inline_corrections_endpoint(
-    file_id: str = Form(...), client_id: str = Form(...), file_type: str = Form("general"),
-    corrections: str = Form(...), corrected_by: str = Form(None),
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general"),
+    corrections: str = Form(...),
+    corrected_by: str = Form(None),
 ):
     mapping = get_mapping(client_id, file_type)
     if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found.")
+        raise HTTPException(status_code=400, detail="No saved mapping found for this client.")
     try:
         corrections_list = json.loads(corrections)
     except json.JSONDecodeError:
@@ -578,10 +934,13 @@ async def submit_inline_corrections_endpoint(
         raise HTTPException(status_code=400, detail="No corrections provided.")
     save_cleaning_corrections(file_id, client_id, file_type, corrections_list, corrected_by)
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
-    return {"file_id": file_id, "client_id": client_id, "file_type": file_type,
-            "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
-            "validation_report": report, "can_proceed": report.get("total_issues", 0) == 0,
-            "message": f"{len(corrections_list)} correction(s) saved and re-cleaned."}
+    return {
+        "file_id": file_id, "client_id": client_id, "file_type": file_type,
+        "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
+        "validation_report": report,
+        "can_proceed": report.get("can_proceed", False),
+        "message": f"{len(corrections_list)} correction(s) saved and re-cleaned."
+    }
 
 # ── CLIENTS ───────────────────────────────────────────────────────────────────
 @app.get("/clients")
