@@ -3,15 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { cleanFile, submitCorrectedExcel } from '../services/api'
 import '../styles/UploadPage.css'
 import '../styles/CleanPage.css'
-
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+// Add a loading spinner to the "Run Cleaning Engine" button
 function CleanPage( ) {
     const location = useLocation()
     const navigate = useNavigate()
-
     const { uploadResult, clientId, fileType } = location.state || {}
-
     const [currentUpload, setCurrentUpload] = useState(uploadResult)
     const [cleaning, setCleaning] = useState(false)
     const [cleanResult, setCleanResult] = useState(null)
@@ -21,6 +19,7 @@ function CleanPage( ) {
     const [uploadingCorrected, setUploadingCorrected] = useState(false)
     const correctedFileInputRef = useRef(null)
 
+    // Add a loading spinner to the "Run Cleaning Engine" button
     const handleClean = async () => {
         setCleaning(true)
         setError(null)
@@ -37,12 +36,11 @@ function CleanPage( ) {
             setCleaning(false)
         }
     }
-
+    // Handle downloading the cleaned Excel file
     const handleDownloadExcel = () => {
         if (!cleanResult) return
         const url = `${API_BASE}/clean/export-cleaned/${cleanResult.file_id}?client_id=${encodeURIComponent(clientId)}&file_type=${encodeURIComponent(fileType || 'other')}`
         window.open(url, '_blank')
-        
         setDownloaded(true)
         setShowDownloadMessage(true) // Show the message
         
@@ -51,7 +49,7 @@ function CleanPage( ) {
             setShowDownloadMessage(false)
         }, 5000)
     }
-
+    // Handle uploading the corrected Excel file
     const handleUploadCorrectedFile = async (e) => {
         const selectedFile = e.target.files[0]
         if (!selectedFile || !cleanResult) return
@@ -84,13 +82,13 @@ function CleanPage( ) {
             }
         }
     }
-
+    // Reset the downloaded state when the component mounts
     const report = cleanResult?.validation_report
     const allRows = cleanResult?.cleaned_data || []
     const previewRows = allRows.slice(0, 5)
     const totalRows = allRows.length
     const flaggedRows = cleanResult ? new Set((report?.issues || []).filter(i => i.row_index !== 'N/A').map(i => Number(i.row_index))) : new Set()
-
+    // Update the current upload state when the component mounts
     if (!uploadResult) {
         return (
             <div className="page">
@@ -100,6 +98,7 @@ function CleanPage( ) {
         )
     }
 
+    // Return the component
     return (
         <div className="page">
             {/* <div className="header">

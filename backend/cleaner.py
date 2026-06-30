@@ -2,7 +2,7 @@ import pandas as pd
 import re
 from datetime import datetime
 
-# Known boolean/status value groups that should be consistent — flag if mixed
+# Boolean/status value groups that should be consistent.Flag if mixed
 BOOLEAN_VALUE_GROUPS = [
     {'yes', 'no'},
     {'y', 'n'},
@@ -11,6 +11,7 @@ BOOLEAN_VALUE_GROUPS = [
     {'active', 'inactive'},
 ]
 
+# Function to detect ambiguous date strings
 def detect_ambiguous_date_string(val_str: str):
     """
     Detects date strings where the day/month order is genuinely ambiguous —
@@ -37,21 +38,19 @@ def detect_ambiguous_date_string(val_str: str):
 
     first, second, year = int(match.group(1)), int(match.group(2)), match.group(3)
 
-    # If either number is > 12, only one reading is possible (it must be the day),
-    # so there's no real ambiguity — e.g. '23/01/2024' can only be 23 Jan.
+    # If either number is > 12, only one reading is possible (it must be the day). So there's no real ambiguity, e.g. '23/01/2024' can only be 23 Jan.
     if first > 12 or second > 12:
         return None
 
-    # If first == second (e.g. '05/05/2024'), both readings give the same date —
-    # not ambiguous in any way that matters.
+    # If first == second (e.g. '05/05/2024'), both readings give the same date. Not ambiguous in any way that matters.
     if first == second:
         return None
-
+    # Otherwise, both readings are possible.
     day_first_reading = f"{year}-{second:02d}-{first:02d}"   # DD/MM/YYYY
     month_first_reading = f"{year}-{first:02d}-{second:02d}" # MM/DD/YYYY
     return day_first_reading, month_first_reading
 
-
+# Function to normalize amount strings
 def normalize_amount_str(s: str) -> str:
     # Remove spaces used as thousand separators e.g. "7 200" -> "7200"
     s = re.sub(r'(\d)\s+(\d)', r'\1\2', s)
@@ -72,7 +71,7 @@ def detect_duplicate_mappings(mapping: dict) -> dict:
         if not isinstance(info, dict):
             continue
         mapped_to = str(info.get("mapped_to", "")).strip()
-        # "unknown" is allowed to repeat — those columns are never renamed, so they never collide
+        # "unknown" is allowed to repeat, those columns are never renamed, so they never collide
         if mapped_to in ("", "unknown"):
             continue
         seen.setdefault(mapped_to, []).append(original_col)
@@ -86,7 +85,6 @@ def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None) ->
     fill_rates: {original_col: float} — proportion of non-empty values per column (0.0 to 1.0).
     Columns with fill rate below 50% get one summary flag instead of per-row missing value flags.
     Returns cleaned dataframe and a validation report.
-
     Raises ValueError early if the mapping has two original columns mapped to the same
     standard field name — this would otherwise create duplicate column names after renaming
     and crash deep inside cleaning with a confusing pandas error. Catching it here gives a
@@ -102,13 +100,11 @@ def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None) ->
             f"Mapping conflict: two or more original columns are mapped to the same field. {details}. "
             f"Please go back to the mapping step and give each column a unique 'Mapped To' value."
         )
-
     if fill_rates is None:
         fill_rates = {}
 
     # Keep a copy of original dataframe for comparison
     original_df = df.copy()
-
     # Track all issues found
     issues = []
 
@@ -180,8 +176,7 @@ def clean_dates(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame:
             # silently parse one way with no way for the auditor to know the other
             # reading was just as valid. Unlike the date-order check (which only
             # catches this indirectly, and only when a second date column exists
-            # in the same row to disagree with), this flags it directly at parse
-            # time, on any single date column.
+            # in the same row to disagree with), this flags it directly at parse.Time, on any single date column.
             ambiguity = detect_ambiguous_date_string(val_str)
             if ambiguity:
                 day_first_reading, month_first_reading = ambiguity
@@ -210,7 +205,6 @@ def clean_dates(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame:
                     cleaned = dt.strftime("%Y-%m-%d")
             except Exception:
                 pass
-
             if cleaned:
                 # Successfully parsed, replace with standardized date
                 df.at[idx, col] = cleaned
@@ -315,8 +309,7 @@ def check_value_consistency(df: pd.DataFrame, mapping: dict, issues: list) -> No
     """
     Flags columns that mix multiple boolean/status VOCABULARIES for the same logical
     concept — e.g. some rows say 'Yes'/'No' while others say 'Y'/'N' in the same column.
-
-    IMPORTANT: a column containing both members of a single group (e.g. 'Y' AND 'N' in
+    A column containing both members of a single group (e.g. 'Y' AND 'N' in
     the same {'y', 'n'} group) is NOT an inconsistency — that's just a normal boolean
     column with both true and false rows. The bug this replaces treated "column contains
     more than one value from a group" as mixed, which meant every healthy boolean column
@@ -341,15 +334,13 @@ def check_value_consistency(df: pd.DataFrame, mapping: dict, issues: list) -> No
         if not unique_vals:
             continue
 
-        # If the column's values fit entirely within a single known vocabulary group,
-        # it's consistent — skip it, no matter how many of that group's values appear.
+        # If the column's values fit entirely within a single known vocabulary group,it's consistent, skip it, no matter how many of that group's values appear.
         is_consistent = any(unique_vals.issubset(group) for group in BOOLEAN_VALUE_GROUPS)
         if is_consistent:
             continue
 
         # Otherwise, check whether the column straddles two or more different
-        # vocabularies (e.g. some rows 'Yes'/'No', others 'Y'/'N') — that IS a real
-        # inconsistency worth flagging.
+        # vocabularies (e.g. some rows 'Yes'/'No', others 'Y'/'N'), that IS a real. Inconsistency worth flagging.
         touched_groups = [group for group in BOOLEAN_VALUE_GROUPS if unique_vals & group]
         if len(touched_groups) > 1:
             issues.append({
@@ -397,7 +388,7 @@ def check_date_order(df: pd.DataFrame, mapping: dict, issues: list) -> None:
             if (date_a - date_b).days > 1:
                 # NOTE: the flag is attached to col_b (it has to be attached to *some*
                 # column for row-matching), but the actual error could be in EITHER
-                # column — col_b might be correct and col_a wrong (e.g. col_a was an
+                # column, col_b might be correct and col_a wrong (e.g. col_a was an
                 # ambiguous string like 01/05 parsed as 1 May instead of 5 Jan). The
                 # message below deliberately names both dates as suspects instead of
                 # singling out col_b, since blaming col_b misled auditors into "fixing"
@@ -464,8 +455,8 @@ def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict
             })
 
     # Flag missing values in confirmed columns using fill-rate-aware logic:
-    # - Sparse columns (fill rate < 50%) → one summary flag, no per-row noise
-    # - Normal columns (fill rate >= 50%) → per-row flags so each gap gets auditor attention
+    # Sparse columns (fill rate < 50%) → one summary flag, no per-row noise
+    # Normal columns (fill rate >= 50%) → per-row flags so each gap gets auditor attention
     # Skip unknown mapped_to since those are already handled above
     confirmed_columns = [
         (original_col, info["mapped_to"])
@@ -480,7 +471,7 @@ def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict
             continue
         rate = fill_rates.get(original_col, 1.0)  # Default to 1.0 (fully filled) if rate unknown
         if rate < 0.5:
-            # Sparse column — flag once with fill rate context instead of flooding the report
+            # Sparse column, flag once with fill rate context instead of flooding the report
             fill_pct = round(rate * 100)
             missing_pct = 100 - fill_pct
             issues.append({
@@ -495,7 +486,7 @@ def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict
                 "severity": "medium"
             })
         else:
-            # Normal column — flag each missing value individually so the auditor can address them
+            # Normal column, flag each missing value individually so the auditor can address them
             for idx, value in df[col].items():
                 if pd.isna(value) or str(value).strip() == "" or value == "":
                     issues.append({

@@ -26,27 +26,14 @@ def get_db():
     finally:
         conn.close()
 
-# Initialize all database tables on startup. Safe to call repeatedly — uses CREATE TABLE IF NOT EXISTS
-# so existing tables are never recreated or overwritten.
-#
-# IMPORTANT: CREATE TABLE IF NOT EXISTS does NOT add columns to a table that already exists in an
-# older shape. If column_mappings was created before field_type (or reviewed_unknown, or required)
-# existed in this schema, the CREATE TABLE statement below is a no-op for that table every time
-# init_db() runs — the table stays stuck in its original shape forever, and any query referencing
-# a newer column fails with "Unknown column 'x' in 'field list'". Every column added to an existing
-# table after its initial release needs an explicit ALTER TABLE check below, the same way
-# reviewed_unknown and required already do — field_type itself was missing this check, which is
-# what caused 1054 (42S22): Unknown column 'field_type' in 'field list' on a database whose
-# column_mappings table predates that column being added to the schema.
+# Initialize all database tables on startup. Can be call repeatedly, uses CREATE TABLE IF NOT EXISTS
+
 def init_db():
     conn = get_connection()
     # Use dictionary=True so fetchone() returns dict instead of tuple — needed for the ALTER TABLE column checks below
     cursor = conn.cursor(dictionary=True)
 
     # Column mappings table. Stores confirmed AI or manual mapping per client per file type.
-    # UNIQUE KEY prevents duplicate mappings for the same client + file_type + column combination.
-    # field_type, reviewed_unknown and required are extended fields added later; ALTER TABLE checks
-    # below handle existing databases whose table predates one or more of these columns.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS column_mappings (
             id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -63,10 +50,7 @@ def init_db():
             UNIQUE KEY uq_column_mapping (client_id, file_type, original_column)
         )
     """)
-    # FIX: this check was missing — field_type itself needs the same existing-table migration
-    # treatment that reviewed_unknown and required already get below. Without this, a
-    # column_mappings table created before field_type existed stays missing that column forever,
-    # and get_mapping()'s SELECT (which explicitly lists field_type) fails on every call.
+    # FIX: this check was missing, field_type itself needs the same existing-table migration
     cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'column_mappings' AND column_name = 'field_type'", (DB_CONFIG["database"],))
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE column_mappings ADD COLUMN field_type VARCHAR(100) NOT NULL DEFAULT 'unknown'")
@@ -94,7 +78,7 @@ def init_db():
     """)
 
     # Schema fingerprints table. file_type stores the REAL file_type category (e.g. "accounts_payable"),
-    # not a file extension — saved from /detect-columns, which is the only place the real category is known.
+    # not a file extension, saved from /detect-columns, which is the only place the real category is known.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS schema_fingerprints (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -257,7 +241,7 @@ def init_db():
     """)
 
     # Inline corrections (also used for row/column deletion markers from the Excel re-upload flow).
-    # One row per corrected cell — the UNIQUE KEY on (file_id, client_id, file_type, row_index, column_name)
+    # One row per corrected cell, the UNIQUE KEY on (file_id, client_id, file_type, row_index, column_name)
     # means re-correcting the same cell upserts rather than duplicates.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cleaning_corrections (
@@ -335,7 +319,7 @@ def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: st
 
 
 # Save a schema fingerprint, keyed by client + fingerprint + REAL file_type category.
-# ON DUPLICATE KEY UPDATE id = id is intentional — we only want to record that a fingerprint was
+# ON DUPLICATE KEY UPDATE id = id is intentional, we only want to record that a fingerprint was
 # seen, not overwrite it with a newer timestamp on repeated uploads of the same schema.
 def save_fingerprint(client_id: str, fingerprint: str, file_type: str, columns: list):
     conn = get_connection()
@@ -349,7 +333,7 @@ def save_fingerprint(client_id: str, fingerprint: str, file_type: str, columns: 
     conn.commit()
     conn.close()
 
-
+# Check if a schema fingerprint already exists for a client and a file type.
 def get_fingerprint(client_id: str, fingerprint: str, file_type: str = "general") -> bool:
     """
     Check if a schema fingerprint already exists for a client AND file type.
@@ -371,7 +355,7 @@ def get_fingerprint(client_id: str, fingerprint: str, file_type: str = "general"
     finally:
         conn.close()
 
-
+# Retrieve the saved column mapping for a client and file type.
 def get_mapping(client_id: str, file_type: str = "general") -> dict:
     """
     Retrieve the saved column mapping for a client and file type.
@@ -429,7 +413,7 @@ def get_uploads(client_id: str) -> list:
     conn.close()
     return [dict(row) for row in rows]
 
-
+# Save an auditor acknowledgment for a specific issue in a file.
 def save_cleaning_acknowledgment(
     issue_id: str,
     file_id: str,
@@ -468,7 +452,7 @@ def save_cleaning_acknowledgment(
     conn.commit()
     conn.close()
 
-
+# Retrieve all acknowledged issue IDs for a specific file and client.
 def get_acknowledged_issue_ids(file_id: str, client_id: str, file_type: str) -> set:
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
@@ -483,7 +467,7 @@ def get_acknowledged_issue_ids(file_id: str, client_id: str, file_type: str) -> 
     finally:
         conn.close()
 
-
+# Save all auditor corrections for a file in a single batch.
 def save_cleaning_corrections(
     file_id: str,
     client_id: str,
@@ -522,7 +506,7 @@ def save_cleaning_corrections(
     conn.commit()
     conn.close()
 
-
+# Retrieve all saved corrections for a file, to apply them before running cleaning again.
 def get_cleaning_corrections(file_id: str, client_id: str, file_type: str) -> list:
     """
     Return all saved corrections for a file as a list of dicts with row_index, column_name,
@@ -543,7 +527,7 @@ def get_cleaning_corrections(file_id: str, client_id: str, file_type: str) -> li
     finally:
         conn.close()
 
-
+# Save a snapshot of the cleaned data for a file, to compare against a later re-uploaded corrected file.
 def save_cleaning_snapshot(file_id: str, client_id: str, file_type: str, cleaned_df):
     """
     Save the cleaned data exactly as it looked at the moment an Excel export was generated.
@@ -563,7 +547,7 @@ def save_cleaning_snapshot(file_id: str, client_id: str, file_type: str, cleaned
     conn.commit()
     conn.close()
 
-
+# Retrieve a saved cleaning snapshot, loading it back from JSON into a list of dicts.
 def get_cleaning_snapshot(file_id: str, client_id: str, file_type: str):
     """
     Retrieve the saved cleaned-data snapshot for comparison against a re-uploaded corrected file.

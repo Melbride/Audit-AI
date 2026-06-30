@@ -16,14 +16,9 @@ function MappingPage() {
     const [reviewedUnknowns, setReviewedUnknowns] = useState({})
     const [editingCol, setEditingCol] = useState(null)
     const [fileType, setFileType] = useState('other')
-    // Tracks the custom text typed when "Other" is selected, separate from the
-    // dropdown's own value, so switching back and forth between presets and a
-    // custom name doesn't lose what was typed.
+    // Custom label kept separate from fileType so toggling presets doesn't lose typed text
     const [customFileTypeLabel, setCustomFileTypeLabel] = useState('')
-    // Tracks where this mapping came from ("llm_detection", "saved_mapping",
-    // "fingerprint_cache") so the banner can explain to the auditor why this
-    // screen rendered instantly with everything already filled in, instead of
-    // looking identical to (and as slow as) a fresh AI detection.
+    // Where the mapping came from (AI / saved mapping / fingerprint cache), used for the banner
     const [detectionSource, setDetectionSource] = useState(null)
     const [detectionMessage, setDetectionMessage] = useState(null)
 
@@ -38,11 +33,7 @@ function MappingPage() {
         other: 'Other',
     }
 
-    // The actual file_type value sent to the backend. For any preset category
-    // this is just the dropdown's key. For "other" with a custom label typed
-    // in, we use the custom text itself (normalized) as the real file_type —
-    // this is what gets stored as the mapping/fingerprint cache key, so a
-    // future upload with the same custom category can still hit the cache.
+    // Resolves the actual file_type value to send to the backend
     const effectiveFileType = () => {
         if (fileType === 'other' && customFileTypeLabel.trim() !== '') {
             return customFileTypeLabel.trim().toLowerCase().replace(/\s+/g, '_')
@@ -50,6 +41,7 @@ function MappingPage() {
         return fileType
     }
 
+    // Adds reviewed_unknown flags before saving/persisting the mapping
     const buildPersistedMapping = () => {
         if (!mapping) return null
         return Object.fromEntries(
@@ -64,6 +56,7 @@ function MappingPage() {
         if (uploadResult) handleDetect()
     }, [])
 
+    // Calls backend to detect/suggest column mappings for the uploaded file
     const handleDetect = async () => {
         setDetecting(true)
         setError(null)
@@ -84,10 +77,7 @@ function MappingPage() {
                 if (Object.prototype.hasOwnProperty.call(FILE_TYPE_CATEGORIES, suggested)) {
                     setFileType(suggested)
                 } else {
-                    // The suggested/cached file_type isn't one of the 8 presets —
-                    // it's a previously-saved custom category. Select "other" and
-                    // pre-fill the custom label with it so the auditor sees exactly
-                    // what was used last time, editable if they want to change it.
+                    // Not a preset, treat as a previously-saved custom category
                     setFileType('other')
                     setCustomFileTypeLabel(response.data.suggested_file_type_label || suggested)
                 }
@@ -99,6 +89,7 @@ function MappingPage() {
         }
     }
 
+    // Updates a single mapping field for a column
     const handleMappingChange = (originalCol, field, value) => {
         const normalized = field === 'mapped_to'
             ? value.toLowerCase().trim().replace(/\s+/g, '_')
@@ -131,6 +122,7 @@ function MappingPage() {
         setReviewedUnknowns(prev => ({ ...prev, [originalCol]: !prev[originalCol] }))
     }
 
+    // True if this row still needs the auditor's attention
     const isRowUnresolved = (col, info) => {
         if (!info.mapped_to || info.mapped_to.trim() === '') return true
         if (info.mapped_to === 'unknown' && !reviewedUnknowns[col]) return true
@@ -145,6 +137,7 @@ function MappingPage() {
 
     const fileTypeIsIncomplete = () => fileType === 'other' && customFileTypeLabel.trim() === ''
 
+    // Validates mapping/file type, then saves the confirmed mapping to the backend
     const handleSave = async () => {
         if (hasUnresolvedRows()) {
             setError('Please review all "Needs Review" columns before saving, either map them or confirm they should stay unknown.')
@@ -204,9 +197,7 @@ function MappingPage() {
         return { pct, cls }
     }
 
-    // when detection didn't actually call the AI. Both cache paths ("saved_mapping"
-    // and "fingerprint_cache") get the same friendly framing; the underlying
-    // backend message is still shown alongside for anyone who wants the detail.
+    // Banner text shown when mapping came from a cache/saved profile instead of fresh AI detection
     const cacheBannerText = () => {
         if (detectionSource === 'saved_mapping' || detectionSource === 'fingerprint_cache') {
             return "This mapping was loaded from this client's saved profile.Review, change and confirm as needed."
@@ -264,6 +255,7 @@ function MappingPage() {
                         Unknown columns must be fixed or skipped before saving.
                     </p>
 
+                    {/* File type selector: dropdown of presets, or text input when "Other" is chosen */}
                     <div className="file-type-row">
                         <label className="file-type-label">File Type:</label>
 
@@ -320,6 +312,7 @@ function MappingPage() {
                         )
                     })()}
 
+                    {/* Table listing each detected column with its mapping details */}
                     <div className="table-wrapper">
                         <table>
                             <thead>
@@ -352,6 +345,7 @@ function MappingPage() {
                                             <td>
                                                 <span className={`fill-rate ${cls}`}>{pct}%</span>
                                             </td>
+                                            {/* Click-to-edit "Mapped To" cell */}
                                             <td>
                                                 <div className="mapped-to-cell">
                                                     {editingCol === col ? (
