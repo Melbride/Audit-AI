@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { login, requestPasswordReset, confirmPasswordReset } from "../services/api";
 
+// Centralized color palette used for inline styles throughout this component
 const colors = {
   primary:    "#1E3A5F",
   secondary:  "#2E86C1",
@@ -14,19 +15,30 @@ const colors = {
   danger:     "#E74C3C",
 };
 
+// Login: handles the full auth flow on one page 
 export default function Login({ onLogin }) {
   const navigate = useNavigate()
 
+  // Which form is currently displayed: "login" | "forgot" | "reset"
   const [view, setView] = useState("login");
+
+  // Login form fields
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [resetEmail, setResetEmail] = useState("");
-  const [resetToken, setResetToken] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
 
+  // Forgot/reset password flow fields
+  const [resetEmail, setResetEmail] = useState("");   // email used to request a reset token
+  const [resetToken, setResetToken] = useState("");    // token received from the server, also editable/pasteable by the user
+  const [newPassword, setNewPassword] = useState("");  // new password to set during reset
+
+  // Shared feedback state across all three views
+  const [message, setMessage] = useState(""); // success/info message
+  const [error, setError] = useState("");     // error message
+  const [loading, setLoading] = useState(false); // true while any request is in flight
+
+  // Handles the login form submission.
+  // On success, stores the token/user in localStorage, notifies the parent
+  // via onLogin, and redirects to the dashboard.
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -48,6 +60,9 @@ export default function Login({ onLogin }) {
     setLoading(false);
   };
 
+  // Handles the "forgot password" form submission.
+  // Requests a reset token for the given email; on success, switches to the
+  // "reset" view and pre-fills the token so the user just adds a new password.
   const handleForgot = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -68,6 +83,9 @@ export default function Login({ onLogin }) {
     setLoading(false);
   };
 
+  // Handles the "reset password" form submission.
+  // Confirms the reset token along with the new password; on success,
+  // returns the user to the login view.
   const handleReset = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -87,6 +105,7 @@ export default function Login({ onLogin }) {
     setLoading(false);
   };
 
+  // Shared inline style objects reused across the login/forgot/reset forms
   const inputStyle = {
     width: "100%", padding: "12px 14px", border: "1.5px solid #dce1e7",
     borderRadius: "8px", fontSize: "14px", color: colors.text,
@@ -105,10 +124,11 @@ export default function Login({ onLogin }) {
   };
 
   return (
+    // Full-screen centered layout with a two-panel card (branding left, form right)
     <div style={{ minHeight: "100vh", background: colors.background, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', sans-serif" }}>
       <div style={{ display: "flex", width: "900px", minHeight: "560px", borderRadius: "16px", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.12)" }}>
 
-        {/* LEFT PANEL */}
+        {/* LEFT PANEL — branding / marketing copy, purely decorative */}
         <div style={{ width: "45%", background: colors.primary, padding: "48px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", color: colors.white }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "48px" }}>
@@ -122,13 +142,14 @@ export default function Login({ onLogin }) {
           </div>
         </div>
 
-        {/* RIGHT PANEL */}
+        {/* RIGHT PANEL — the actual interactive form area */}
         <div style={{ width: "55%", background: colors.white, padding: "48px 40px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "28px" }}>
             <img src="/favicon.svg" alt="Audit AI logo" style={{ width: "34px", height: "34px" }} />
             <span style={{ fontSize: "20px", fontWeight: "700", color: colors.primary }}>Audit AI</span>
           </div>
 
+          {/* Shared error/success banners, shown above whichever form is active */}
           {error && (
             <div style={{ background: "#fdecea", border: `1px solid ${colors.danger}`, color: colors.danger, padding: "12px 16px", borderRadius: "8px", fontSize: "13px", marginBottom: "20px" }}>{error}</div>
           )}
@@ -150,6 +171,7 @@ export default function Login({ onLogin }) {
                   <label style={{ ...labelStyle, color: colors.primary }}>Password</label>
                   <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" required style={{ ...inputStyle, color: colors.primary }} />
                 </div>
+                {/* Switches to the "forgot password" view */}
                 <div style={{ textAlign: "right", marginBottom: "24px" }}>
                   <span onClick={() => { setView("forgot"); setError(""); setMessage(""); }} style={{ fontSize: "13px", color: colors.secondary, cursor: "pointer", fontWeight: "500" }}>Forgot password?</span>
                 </div>
@@ -158,7 +180,7 @@ export default function Login({ onLogin }) {
             </>
           )}
 
-          {/* FORGOT PASSWORD FORM */}
+          {/* FORGOT PASSWORD FORM — requests a reset token by email */}
           {view === "forgot" && (
             <>
               <h3 style={{ fontSize: "24px", fontWeight: "700", color: colors.primary, marginBottom: "8px" }}>Reset your password</h3>
@@ -169,6 +191,7 @@ export default function Login({ onLogin }) {
                   <input type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="you@auditai.com" required style={{ ...inputStyle, color: colors.primary }} />
                 </div>
                 <button type="submit" disabled={loading} style={btnStyle}>{loading ? "Sending..." : "Send Reset Token"}</button>
+                {/* Back to login without submitting anything */}
                 <div style={{ textAlign: "center" }}>
                   <span onClick={() => { setView("login"); setError(""); }} style={{ fontSize: "13px", color: colors.secondary, cursor: "pointer" }}>← Back to login</span>
                 </div>
@@ -176,7 +199,7 @@ export default function Login({ onLogin }) {
             </>
           )}
 
-          {/* RESET PASSWORD FORM */}
+          {/* RESET PASSWORD FORM — confirms token + sets new password */}
           {view === "reset" && (
             <>
               <h3 style={{ fontSize: "24px", fontWeight: "700", color: colors.primary, marginBottom: "8px" }}>Set new password</h3>
@@ -191,6 +214,7 @@ export default function Login({ onLogin }) {
                   <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Enter new password" required style={{ ...inputStyle, color: colors.primary }} />
                 </div>
                 <button type="submit" disabled={loading} style={btnStyle}>{loading ? "Resetting..." : "Reset Password"}</button>
+                {/* Back to login without submitting anything */}
                 <div style={{ textAlign: "center" }}>
                   <span onClick={() => { setView("login"); setError(""); setMessage(""); }} style={{ fontSize: "13px", color: colors.secondary, cursor: "pointer" }}>← Back to login</span>
                 </div>

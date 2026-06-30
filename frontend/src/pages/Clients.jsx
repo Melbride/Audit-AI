@@ -2,17 +2,22 @@ import { useState, useEffect } from "react";
 import { getClients, createClient, updateClient, deleteClient } from "../services/api";
 import "../styles/Clients.css";
 
+// Clients page: lists all client records and (for authorized roles)
+// supports creating, editing, and deleting clients via a shared modal form.
 export default function Clients({ user }) {
-  const [clients, setClients]         = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [showModal, setShowModal]     = useState(false);
-  const [editingClient, setEditingClient] = useState(null);
+  const [clients, setClients]         = useState([]); // client list shown in the table
+  const [loading, setLoading]         = useState(true); // true while clients are being fetched
+  const [showModal, setShowModal]     = useState(false); // controls visibility of the add/edit modal
+  const [editingClient, setEditingClient] = useState(null); // the client being edited, or null when creating
+
+  // Form fields for both create and edit flows (same modal/form is reused for both)
   const [form, setForm] = useState({
     company_name: "", contact_person: "", email: "",
     phone: "", industry: "", address: "", status: "Active",
   });
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false); // true while a save (create/update) request is in flight
 
+  // Load the client list once on mount
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -27,16 +32,20 @@ export default function Clients({ user }) {
     load();
   }, []);
 
+  // Only Admins and Senior Auditors can create/edit/delete clients
   const isAdmin  = user.role === "Admin";
   const isSenior = user.role === "Senior Auditor";
   const canEdit  = isAdmin || isSenior;
 
+  // Opens the modal in "create" mode with a blank form
   const openCreate = () => {
     setEditingClient(null);
     setForm({ company_name: "", contact_person: "", email: "", phone: "", industry: "", address: "", status: "Active" });
     setShowModal(true);
   };
 
+  // Opens the modal in "edit" mode, pre-filling the form with the
+  // selected client's existing values (falling back to "" for any missing field)
   const openEdit = (c) => {
     setEditingClient(c);
     setForm({
@@ -51,6 +60,7 @@ export default function Clients({ user }) {
     setShowModal(true);
   };
 
+  // Handles form submission for both create and edit modes.
   const handleSave = async (e) => {
     e && e.preventDefault();
     if (!canEdit) return;
@@ -73,6 +83,7 @@ export default function Clients({ user }) {
     setSaving(false);
   };
 
+  // Deletes a client after a confirmation prompt, then refreshes the list
   const handleDelete = async (c) => {
     if (!canEdit) return;
     if (!window.confirm(`Delete client "${c.company_name}"? This cannot be undone.`)) return;
@@ -99,7 +110,7 @@ export default function Clients({ user }) {
         )}
       </div>
 
-      {/* Table */}
+      {/* Table: loading state, empty state, or populated client list */}
       <div className="cl-table-wrap">
         {loading ? (
           <p className="cl-loading">Loading clients...</p>
@@ -121,10 +132,12 @@ export default function Clients({ user }) {
                   <td>{c.contact_person || "—"}</td>
                   <td>{c.email || "—"}</td>
                   <td>{c.phone || "—"}</td>
+                  {/* Status cell styled green/active vs. grey/inactive */}
                   <td className={c.status === "Active" ? "cl-td-status--active" : "cl-td-status--inactive"}>
                     {c.status || "Unknown"}
                   </td>
                   <td>
+                    {/* Edit/Delete actions only visible to authorized roles */}
                     {canEdit && (
                       <>
                         <button className="cl-btn-edit" onClick={() => openEdit(c)}>Edit</button>
@@ -139,10 +152,11 @@ export default function Clients({ user }) {
         )}
       </div>
 
-      {/* Modal */}
+      {/* Add/Edit modal — shared form for both create and edit flows */}
       {showModal && canEdit && (
         <div className="cl-modal-overlay">
           <div className="cl-modal">
+            {/* Title switches based on whether we're editing an existing client */}
             <h3 className="cl-modal-title">{editingClient ? "Edit Client" : "Add Client"}</h3>
             <form onSubmit={handleSave}>
 

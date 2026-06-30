@@ -1,6 +1,9 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import '../styles/Layout.css'
 
+// Static list of sidebar navigation items.
+// Each entry defines the route key, the path to navigate to, the label
+// shown in the sidebar, and an inline SVG icon.
 const NAV_ITEMS = [
   {
     key: "dashboard",
@@ -81,15 +84,21 @@ const NAV_ITEMS = [
   },
 ];
 
+// Layout: app shell with a sidebar (logo, nav links, user info/logout)
+
 export default function Layout({ user, onLogout, children }) {
   const location = useLocation()
   const navigate = useNavigate()
 
+  // Determines whether a given nav item should be styled as "active"
+  // based on the current route. Some nav items map to multiple paths
+  
   const isActive = (item) => {
     // Highlight Dashboard for the /files page too
     if (item.key === "dashboard") {
       return location.pathname === "/dashboard" || location.pathname === "/files"
     }
+    // Highlight Engagements for the list page and any engagement detail sub-route
     if (item.key === "engagements") {
       return location.pathname.startsWith("/engagements")
     }
@@ -98,6 +107,7 @@ export default function Layout({ user, onLogout, children }) {
       return ["/upload", "/mapping", "/clean", "/analysis", "/corrected-results"]
         .includes(location.pathname)
     }
+    // Default: exact path match
     return location.pathname === item.path
   }
 
@@ -115,7 +125,7 @@ export default function Layout({ user, onLogout, children }) {
           <span className="layout-logo-text">Audit AI</span>
         </div>
 
-        {/* Nav links */}
+        {/* Nav links — clicking navigates via react-router, active item is highlighted */}
         <nav className="layout-nav">
           {NAV_ITEMS.map(item => (
             <div
@@ -129,7 +139,7 @@ export default function Layout({ user, onLogout, children }) {
           ))}
         </nav>
 
-        {/* User info + logout */}
+        {/* User info + logout — name/role/email are optional (rendered only if present) */}
         <div className="layout-user">
           <div className="layout-user-name">{user?.full_name}</div>
           {user?.role  && <div className="layout-user-role">{user.role}</div>}
@@ -139,7 +149,7 @@ export default function Layout({ user, onLogout, children }) {
 
       </aside>
 
-      {/* Page content */}
+      {/* Page content — whatever page component is currently routed */}
       <main className="layout-main">
         {children}
       </main>

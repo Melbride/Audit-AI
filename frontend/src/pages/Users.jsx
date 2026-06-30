@@ -10,6 +10,7 @@ import {
 import "../styles/Users.css";
 
 // Roles
+// Full list of selectable roles for the role dropdown in the user form
 const ROLES = [
   "Admin",
   "Accountant",
@@ -22,14 +23,18 @@ const ROLES = [
 ];
 
 // Users component
+// Admin-facing user management page: lists all users, and allows Admins
+// to create/edit/delete users. Senior Auditors get a side capability to
+// quickly create a new client via a prompt.
 export default function Users({ user }) {
-  const [users, setUsers] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState([]);     // full list of users shown in the table
+  const [clients, setClients] = useState([]); // clients available for the "Assigned Client" dropdown
+  const [loading, setLoading] = useState(true); // true while initial data is being fetched
 
-  const [showModal, setShowModal] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
+  const [showModal, setShowModal] = useState(false); // controls visibility of the add/edit user modal
+  const [editingUser, setEditingUser] = useState(null); // the user being edited, or null when creating
 
+  // Form fields for both create and edit flows
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -41,15 +46,17 @@ export default function Users({ user }) {
   });
 
   // State
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const isAdmin = user.role === "Admin";
-  const isSenior = user.role === "Senior Auditor";
+  const [error, setError] = useState("");   // error message shown inside the modal
+  const [saving, setSaving] = useState(false); // true while a save request is in flight
+  const isAdmin = user.role === "Admin";          // only Admins can create/edit/delete users
+  const isSenior = user.role === "Senior Auditor"; // Senior Auditors can quick-create clients
 
+  // Load users and clients once on mount
   useEffect(() => {
     loadData();
   }, []);
 
+  // Fetches users and clients in parallel and populates state
   const loadData = async () => {
     setLoading(true);
 
@@ -68,6 +75,7 @@ export default function Users({ user }) {
     setLoading(false);
   };
 
+  // Resets the form and opens the modal in "create" mode
   const openCreateModal = () => {
     if (!isAdmin) return;
 
@@ -87,6 +95,8 @@ export default function Users({ user }) {
     setShowModal(true);
   };
 
+  // Pre-fills the form with the selected user's data and opens the modal
+  // in "edit" mode. Password is intentionally left blank (not editable here).
   const openEditModal = (u) => {
     if (!isAdmin) return;
 
@@ -106,6 +116,10 @@ export default function Users({ user }) {
     setShowModal(true);
   };
 
+  // Handles form submission for both create and edit modes.
+  // Edit: strips the password field (not updatable here) and calls updateUser.
+  // Create: includes the password and calls createUser.
+  // Both convert assigned_client_id to a number (or null if not selected).
   const handleSave = async (e) => {
     e.preventDefault();
 
@@ -151,7 +165,7 @@ export default function Users({ user }) {
       }
 
       setShowModal(false);
-      loadData();
+      loadData(); // refresh table with the new/updated user
     } catch (err) {
       setError(
         "Could not save user. Check your connection."
@@ -161,6 +175,7 @@ export default function Users({ user }) {
     setSaving(false);
   };
 
+  // Deletes a user after confirmation, then refreshes the list
   const handleDelete = async (u) => {
     if (!isAdmin) return;
 
@@ -176,6 +191,8 @@ export default function Users({ user }) {
     loadData();
   };
 
+  // Quick-create flow for Senior Auditors: prompts for a company name
+  // and creates a new client without opening the full client form.
   const handleAddClient = async () => {
     if (!isSenior) return;
 
@@ -205,9 +222,12 @@ export default function Users({ user }) {
     }
   };
 
+  // Converts a role name into a CSS-safe class suffix, e.g.
+  // "Senior Auditor" -> "role-senior-auditor"
   const getRoleClass = (role) =>
     `role-${role.toLowerCase().replace(/\s+/g, "-")}`;
 
+  // Base table headers; "Actions" column is only added for Admins
   const headers = [
     "Name",
     "Email",
@@ -219,6 +239,7 @@ export default function Users({ user }) {
   if (isAdmin) headers.push("Actions");
     return (
     <div className="users-page">
+      {/* Header with page title and "Add User" button (Admin only) */}
       <div className="users-header">
         <div className="users-header-left">
           <h1>User Management</h1>
@@ -237,6 +258,7 @@ export default function Users({ user }) {
         </div>
       </div>
 
+      {/* Users table: loading state, empty state, or populated table */}
       <div className="users-card">
         {loading ? (
           <p className="page-message">Loading users...</p>
@@ -285,6 +307,7 @@ export default function Users({ user }) {
                     </span>
                   </td>
 
+                  {/* Edit/Delete actions only rendered for Admins */}
                   {isAdmin && (
                     <td>
                       <button
@@ -313,6 +336,7 @@ export default function Users({ user }) {
         )}
       </div>
 
+      {/* Add/Edit user modal — shared form, fields vary slightly between modes */}
       {showModal && isAdmin && (
         <div className="modal-overlay">
           <div className="modal">
@@ -364,6 +388,7 @@ export default function Users({ user }) {
                 }
               />
 
+              {/* Password field only shown when creating a new user, not when editing */}
               {!editingUser && (
                 <>
                   <label className="form-label">

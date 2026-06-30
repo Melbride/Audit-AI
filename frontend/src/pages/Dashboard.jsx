@@ -3,14 +3,23 @@ import { useNavigate } from "react-router-dom";
 import { getClients, getEngagements, getFiles } from "../services/api";
 import "../styles/Dashboard.css";
 
+// Dashboard: landing page showing high-level summary stats
+// (client count, engagement count, files uploaded) as clickable cards
+// that navigate to the corresponding section of the app.
 export default function Dashboard({ user }) {
   const navigate = useNavigate();
-
-  const [clients, setClients] = useState([]);
-  const [engagements, setEngagements] = useState([]);
+  // all clients, used only for count here
+  const [clients, setClients] = useState([]);         
+  // all engagements, used only for count here
+  const [engagements, setEngagements] = useState([]); 
+   // all uploaded files, used only for count here
   const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(true);
+   // true while the three summary fetches are in flight       
+  const [loading, setLoading] = useState(true);        
+  
 
+  // Fetch clients, engagements, and files in parallel whenever the
+  // logged-in user changes (e.g. after switching accounts).
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -33,6 +42,7 @@ export default function Dashboard({ user }) {
     fetchData();
   }, [user.user_id]);
 
+  // Summary cards configuration: each card shows a count, an icon,
   const cards = [
     {
       label: "Total Clients",
@@ -90,6 +100,7 @@ export default function Dashboard({ user }) {
     },
   ];
 
+  // Show a simple loading message until all summary data has been fetched
   if (loading) {
     return (
       <div className="dashboard">
@@ -100,6 +111,7 @@ export default function Dashboard({ user }) {
 
   return (
     <div className="dashboard">
+      {/* Page header with personalized greeting */}
       <div className="dashboard-header">
         <h1>Dashboard</h1>
         <p>
@@ -107,6 +119,7 @@ export default function Dashboard({ user }) {
         </p>
       </div>
 
+      {/* Grid of summary cards; clicking a card navigates to its section */}
       <div className="dashboard-grid">
         {cards.map((card, index) => (
           <div
