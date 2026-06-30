@@ -3,7 +3,7 @@ from openpyxl import load_workbook
 ROW_ID_COLUMN = "_row_id"
 RENAME_MATCH_THRESHOLD = 0.9
 
-
+# Compare two cell values for a real difference, tolerant of numeric formatting
 def values_differ(original_value, uploaded_value) -> bool:
     """
     Compare two cell values for a real difference, tolerant of numeric formatting
@@ -11,7 +11,6 @@ def values_differ(original_value, uploaded_value) -> bool:
     """
     orig_str = "" if original_value is None else str(original_value).strip()
     up_str = "" if uploaded_value is None else str(uploaded_value).strip()
-
     if orig_str == up_str:
         return False
 
@@ -24,18 +23,16 @@ def values_differ(original_value, uploaded_value) -> bool:
 
     return True
 
-
+# Find the changes between a snapshot and a re-uploaded file.
 def _match_score(snapshot_rows_by_id, uploaded_rows_by_id, shared_row_ids, old_name, new_name):
     """
     Compares one candidate old column against one candidate new column, across every
     row present in both the snapshot and the upload. Returns (score, compared_count).
-
     score is the fraction of compared values that are identical (0.0 to 1.0).
     compared_count is how many rows actually contributed evidence — rows where BOTH
     sides are blank are skipped entirely, since two unrelated empty columns would
     otherwise "match" with no real evidence behind it. compared_count == 0 means this
-    candidate provided no information at all and must never be treated as a winner,
-    no matter how the score divides out.
+    candidate provided no information at all and must never be treated as a winner,no matter how the score divides out.
     """
     compared = 0
     matched = 0
@@ -53,7 +50,7 @@ def _match_score(snapshot_rows_by_id, uploaded_rows_by_id, shared_row_ids, old_n
         return 0.0, 0
     return matched / compared, compared
 
-
+# Resolve any ambiguities when a column is both renamed and deleted.
 def _resolve_renames(missing_names, added_names, snapshot_rows_by_id, uploaded_rows_by_id):
     """
     Figures out which missing column name(s) each added column name actually replaces,
@@ -74,7 +71,6 @@ def _resolve_renames(missing_names, added_names, snapshot_rows_by_id, uploaded_r
     that WAS confidently resolved still goes through normally. This means one unclear
     rename among several no longer blocks the rest, unlike the single-rename version
     where any uncertainty failed the whole upload.
-
     Returns (renamed_columns, unresolved_new_names) where renamed_columns is
     {old_name: new_name} for every confidently-resolved pairing, and unresolved_new_names
     is the set of added names that could not be confidently paired with anything.
@@ -96,16 +92,7 @@ def _resolve_renames(missing_names, added_names, snapshot_rows_by_id, uploaded_r
 
     # Greedily assign the strongest pairing first, then the next-strongest among what's
     # left, and so on. A pairing is only withheld as a genuine tie when something ELSE
-    # at the same score is contesting the SAME new_name or the SAME old_name — two
-    # unrelated pairings simply happening to share a score (e.g. two different, clean
-    # renames both scoring a perfect 1.0) are not in conflict with each other at all and
-    # must both be allowed through. The earlier version of this check treated any equal
-    # score as a tie regardless of whether the pairings overlapped, which incorrectly
-    # blocked every legitimate multi-rename case — only an actual overlap (two
-    # candidates both wanting the same new_name, or both wanting the same old_name)
-    # represents real, unresolvable uncertainty.
     candidates.sort(key=lambda c: (-c[0], -c[1]))
-
     renamed_columns = {}
     claimed_new_names = set()
     claimed_old_names = set()
@@ -126,17 +113,16 @@ def _resolve_renames(missing_names, added_names, snapshot_rows_by_id, uploaded_r
         tied_at_top = [c for c in remaining if c[0] == top_score and c[1] == top_compared]
 
         # Among the candidates tied at this score level, find genuine conflicts: more
-        # than one candidate wanting the same new_name, or more than one wanting the
-        # same old_name.
+        # than one candidate wanting the same new_name, or more than one wanting the same old_name.
         new_name_counts = {}
         old_name_counts = {}
         for score, compared, new_name, old_name in tied_at_top:
             new_name_counts[new_name] = new_name_counts.get(new_name, 0) + 1
             old_name_counts[old_name] = old_name_counts.get(old_name, 0) + 1
-
         contested_new_names = {n for n, count in new_name_counts.items() if count > 1}
         contested_old_names = {n for n, count in old_name_counts.items() if count > 1}
 
+        # If a new_name is contested (more than one old_name wants it) or an old_name is contested
         for score, compared, new_name, old_name in tied_at_top:
             if new_name in contested_new_names or old_name in contested_old_names:
                 # Genuine, unresolvable conflict at this score level — withhold this
@@ -148,11 +134,10 @@ def _resolve_renames(missing_names, added_names, snapshot_rows_by_id, uploaded_r
                 claimed_old_names.add(old_name)
 
         remaining = [c for c in remaining if c[0] != top_score or c[1] != top_compared]
-
     unresolved_new_names = added_names - claimed_new_names
     return renamed_columns, unresolved_new_names
 
-
+# Compare a re-uploaded file against the snapshot of what was originally downloaded.
 def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list) -> dict:
     """
     Read a re-uploaded, auditor-edited Excel file (from the cleaning workbook export) and
@@ -230,15 +215,6 @@ def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list)
             clean_headers.append(h)
 
     # Reject immediately if the uploaded file has two columns with the same header
-    # name. This is the case where a rename collides with an EXISTING column — e.g.
-    # renaming "department" to "department_name" when "department_name" already
-    # exists elsewhere in the file. That case is invisible to the set-difference
-    # logic below (the new name was never "new" relative to the snapshot, since it
-    # already existed), so without this explicit check the renamed column's data
-    # silently falls into deleted_columns with no error at all, and the dict-building
-    # step below would also silently lose data via key overwrite. Catching it here,
-    # directly from the duplicate header text itself, is the only reliable signal —
-    # it doesn't depend on knowing anything about the snapshot.
     seen_headers = {}
     duplicate_headers = set()
     for h in clean_headers:
@@ -317,6 +293,7 @@ def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list)
     for old_name, new_name in renamed_columns.items():
         diffable_columns[old_name] = new_name
 
+    # Build a list of corrections to apply to the snapshot
     corrections = []
     for row_id, snap_row in snapshot_rows_by_id.items():
         if row_id not in uploaded_rows_by_id:

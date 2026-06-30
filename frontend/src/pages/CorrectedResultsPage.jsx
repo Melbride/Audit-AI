@@ -3,11 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import '../styles/CorrectedResultsPage.css'
 
+// Function to display the corrected results page after the auditor has made corrections to the cleaned data. It shows the updated validation report, allows the auditor to edit flagged rows, and provides options to save corrections or proceed to analysis.
 function CorrectedResultsPage() {
     const location = useLocation()
     const navigate = useNavigate()
     const { cleanResult, uploadResult, clientId, fileType } = location.state || {}
-
     const [currentResult, setCurrentResult] = useState(cleanResult)
     const [pendingEdits, setPendingEdits] = useState({})
     const [saving, setSaving] = useState(false)
@@ -18,6 +18,7 @@ function CorrectedResultsPage() {
     // Tracks which row to scroll/highlight when "Edit this cell" is clicked
     const [highlightedRowIndex, setHighlightedRowIndex] = useState(null)
 
+    // If no data is available, redirect to CleanPage
     if (!cleanResult || !uploadResult) {
         return (
             <div className="cr-page-wrapper">
@@ -28,19 +29,19 @@ function CorrectedResultsPage() {
             </div>
         )
     }
-
+// Extract relevant data from the current result for display and editing
     const report = currentResult.validation_report
     const allRows = currentResult.cleaned_data || []
     const columns = allRows.length > 0 ? Object.keys(allRows[0]) : []
     const flaggedRowIndices = new Set(report.issues.filter(i => i.row_index !== 'N/A' && i.row_index !== null).map(i => parseInt(i.row_index)))
     const flaggedRowsData = allRows.map((row, rowIndex) => ({ row, rowIndex })).filter(({ rowIndex }) => flaggedRowIndices.has(rowIndex))
     const editCount = Object.keys(pendingEdits).length
-
+    // Handle cell edits by storing them in the pendingEdits state 
     const handleCellEdit = (rowIndex, col, originalValue, newValue) => {
         const key = `${rowIndex}__${col}`
         setPendingEdits(prev => ({ ...prev, [key]: { row_index: rowIndex, column: col, original_value: originalValue, corrected_value: newValue } }))
     }
-
+    // Save all pending corrections to the backend and update the current result
     const handleSaveCorrections = async () => {
         const corrections = Object.values(pendingEdits)
         if (corrections.length === 0) { setError('No changes made yet.'); return; }
@@ -55,13 +56,7 @@ function CorrectedResultsPage() {
         } catch (err) { setError(err.response?.data?.detail || 'Could not save corrections.'); } finally { setSaving(false); }
     }
 
-    // "Correct as-is" — auditor reviewed an info-severity issue (e.g. an
-    // ambiguous date) and confirmed the system's guess is right. Calls the
-    // existing acknowledge-issue endpoint, which records who confirmed it
-    // and re-cleans with that issue filtered out. The cell value itself is
-    // left untouched, this is a deliberate, logged decision, not a silent
-    // dismissal, and it's required before Proceed will unlock (can_proceed
-    // counts every severity, info included).
+    // Handle confirming that an issue is correct as-is, sending an acknowledgment to the backend and updating the current result
     const handleConfirmCorrect = async (issue) => {
         setAcknowledging(issue.issue_id)
         setError(null)
@@ -81,11 +76,7 @@ function CorrectedResultsPage() {
         }
     }
 
-    // "Edit this cell", no backend call. Scrolls the matching row into view
-    // in the table below and briefly highlights it, so the auditor lands
-    // exactly where they need to type the correct value. Editing and saving
-    // clears the issue naturally on the next clean cycle, since the
-    // ambiguous/incorrect value is gone.
+    // Handle Edit This Cell action by scrolling to the corresponding row in the table and highlighting it for 3 seconds
     const handleEditThisCell = (issue) => {
         const rowIndex = parseInt(issue.row_index)
         if (isNaN(rowIndex)) return
@@ -95,6 +86,7 @@ function CorrectedResultsPage() {
         setTimeout(() => setHighlightedRowIndex(null), 3000)
     }
 
+    // Sanity check for severity values and return appropriate CSS class for styling
     const severityClass = (severity) => {
         switch (severity?.toLowerCase()) { 
             case 'high': return 'cr-issue-high'; 
@@ -137,13 +129,7 @@ function CorrectedResultsPage() {
                                     <p className="cr-issue-desc">{issue.issue}</p>
 
                                     {/*
-                                      Info-severity issues (currently: ambiguous-date warnings)
-                                      get a real decision instead of being silently exempt.
-                                      "Correct as-is" confirms the system's guess via
-                                      acknowledge-issue. "Edit this cell" jumps to the row in
-                                      the table below. Either path is required to clear the
-                                      issue — can_proceed counts info issues just like high/medium.
-                                    */}
+                                      Info-severity issues (currently: ambiguous-date warnings) have a special action to take*/}
                                     {issue.severity === 'info' && issue.row_index !== 'N/A' && (
                                         <div className="cr-issue-actions">
                                             <button
@@ -211,7 +197,7 @@ function CorrectedResultsPage() {
                             {saving ? 'Saving...' : `Save Corrections (${editCount})`}
                         </button>
                         {/*
-                          can_proceed now counts ALL severities (high, medium, info) — so this
+                          can_proceed counts ALL severities (high, medium, info) — so this
                           warning stays visible, and Proceed stays locked, until every info-level
                           issue has been explicitly confirmed or edited, not just skipped.
                         */}

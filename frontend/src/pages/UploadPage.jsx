@@ -4,24 +4,27 @@ import { uploadFile } from '../services/api'
 import '../styles/UploadPage.css'
 import axios from 'axios'
 
+// UploadPage component allows users to upload financial documents for a selected client. It handles file selection, drag-and-drop functionality, client search and selection, and displays a preview of the uploaded file before proceeding to the mapping page.
 export default function UploadPage() {
     const navigate = useNavigate()
-    const [file, setFile] = useState(null)
-    const [dragging, setDragging] = useState(false)
-    const [uploading, setUploading] = useState(false)
-    const [uploadResult, setUploadResult] = useState(null)
+    const [file, setFile] = useState(null) 
+    const [dragging, setDragging] = useState(false) 
+    const [uploading, setUploading] = useState(false) 
+    const [uploadResult, setUploadResult] = useState(null) 
     const [error, setError] = useState('')
-    const [clients, setClients] = useState([])
-    const [clientSearch, setClientSearch] = useState('')
-    const [selectedClient, setSelectedClient] = useState(null)
-    const [showDropdown, setShowDropdown] = useState(false)
+    const [clients, setClients] = useState([]) 
+    const [clientSearch, setClientSearch] = useState('') 
+    const [selectedClient, setSelectedClient] = useState(null) 
+    const [showDropdown, setShowDropdown] = useState(false) 
 
+    // Load the client list once on mount
     useEffect(() => {
         axios.get('http://localhost:8000/clients')
             .then(res => setClients(res.data))
             .catch(err => console.error('Clients load failed', err))
     }, [])
 
+    // Handles a file dropped onto the dropzone
     const onDropFile = (e) => {
         e.preventDefault()
         setDragging(false)
@@ -31,6 +34,7 @@ export default function UploadPage() {
         }
     }
     
+    // Handles a file picked via the file input
     const onChangeFile = (e) => {
         if (e.target.files?.length) {
             setFile(e.target.files[0])
@@ -38,6 +42,7 @@ export default function UploadPage() {
         }
     }
     
+    // Sends the staged file + selected client to the backend
     const handleUpload = async () => {
         if (!selectedClient || !file) return
         setError('')
@@ -57,11 +62,13 @@ export default function UploadPage() {
     
     return (
         <div className="page">
+            {/* Upload form, hidden once a file has been uploaded and previewed */}
             {!uploadResult && (
                 <div className="card">
                     <h2 className="title">Upload Financial Documents</h2>
                     <div className="field client-field">
                         <label className="label">Client</label>
+                        {/* Search input that filters and opens the client dropdown */}
                         <input
                             className="input"
                             type="text"
@@ -75,6 +82,7 @@ export default function UploadPage() {
                             onFocus={() => setShowDropdown(true)}
                             onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
                         />
+                        {/* Dropdown list of clients matching the search text */}
                         {showDropdown && (
                             <div className="client-dropdown">
                                 {clients
@@ -95,6 +103,7 @@ export default function UploadPage() {
                                 }
                             </div>
                         )}
+                        {/* Confirmation text once a client has been chosen */}
                         {selectedClient && (
                             <p className="selected-client">
                                 Selected: {selectedClient.company_name} (ID: {selectedClient.client_id})
@@ -102,6 +111,7 @@ export default function UploadPage() {
                         )}
                     </div>
 
+                    {/* Shows staged file name, or the dropzone if no file picked yet */}
                     {file ? (
                         <div className="selected-file-container">
                             <div className="selected-file-text-wrapper">
@@ -113,6 +123,7 @@ export default function UploadPage() {
                             </button>
                         </div>
                     ) : (
+                        // Drag-and-drop zone, also clickable to open the file picker
                         <div
                             className={`dropzone ${dragging ? 'dragging' : 'idle'}`}
                             onDragOver={e => { e.preventDefault(); setDragging(true) }}
@@ -132,14 +143,17 @@ export default function UploadPage() {
                     )}
                     <p className="formats">Excel (.xlsx, .xls), CSV, PDF, DOCX - Max 50MB</p>
                     {error && <div className="error">{error}</div>}
+                    {/* Disabled until both a client and a file are selected */}
                     <button className="btn" onClick={handleUpload} disabled={uploading || !selectedClient || !file}>
                         {uploading ? 'Uploading...' : 'Upload File'}
                     </button>
                 </div>
             )}
 
+            {/* Preview shown after a successful upload */}
             {uploadResult && (
                 <div className="preview-card">
+                    {/* Header row with title and a button to reset back to the upload form */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                         <h2 className="title" style={{ margin: 0 }}>File Preview</h2>
                         <button 
@@ -152,6 +166,7 @@ export default function UploadPage() {
                         </button>
                     </div>
 
+                    {/* Quick summary of the uploaded file */}
                     <div className="preview-summary">
                         <div className="summary-item">
                             <span className="summary-label">Filename:</span>
@@ -167,6 +182,7 @@ export default function UploadPage() {
                         </div>
                     </div>
 
+                    {/* Preview table of the uploaded file's first rows */}
                     <div className="table-wrapper">
                         <table>
                             <thead>
@@ -183,6 +199,7 @@ export default function UploadPage() {
                             </tbody>
                         </table>
                     </div>
+                    {/* Moves to the mapping page, carrying the upload result and client id forward */}
                     <button className="btn" onClick={() => navigate('/mapping', { state: { uploadResult, clientId: selectedClient?.client_id } })} style={{ marginTop: '24px' }}>
                         Detect Columns
                     </button>
