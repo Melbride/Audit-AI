@@ -1,0 +1,158 @@
+/* Notifications.css */
+
+/* Page wrapper */
+.notif-page {
+  flex: 1;
+  padding: 0 12px 12px; /* Top padding zeroed out */
+  margin: 0;
+}
+
+/* Page header */
+.notif-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px; /* Reduced vertical gap */
+}
+
+.notif-header h1 {
+  font-size: 16px; /* Scaled text size */
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Teal accent band */
+.notif-header h1::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+.notif-header p {
+  font-size: 13px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.notif-btn-mark-all {
+  height: 32px; /* Standardized height */
+  padding: 0 16px;
+  background: var(--primary);
+  color: var(--background); /* High contrast text */
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition);
+}
+
+.notif-btn-mark-all:hover {
+  background: var(--primary-hover);
+}
+
+/* Notifications card wrapper */
+.notif-card {
+  background: var(--background) !important; /* Flattens card panel */
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: none !important;            /* Removes shadows */
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+.notif-loading,
+.notif-empty {
+  padding: 16px;
+  color: var(--text-soft);
+  background: var(--background);
+  font-size: 13px;
+}
+
+/* Individual notification row */
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px; /* Compact row sizes */
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.notif-item--read {
+  background: var(--surface) !important; /* Nested */
+  cursor: default;
+}
+
+.notif-item--unread {
+  background: rgba(56, 189, 248, 0.03) !important; /* Sky-blue indicator */
+  cursor: pointer;
+}
+
+/* Row hovers */
+.notif-item--read:hover {
+  background: var(--surface-hover) !important;
+}
+
+.notif-item--unread:hover {
+  background: rgba(56, 189, 248, 0.07) !important;
+}
+
+/* Activity dot indicators */
+.notif-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.notif-dot--read   { background: transparent; }
+.notif-dot--unread { background: var(--accent); } /* Sky-blue dot indicator */
+
+/* Message body */
+.notif-body {
+  flex: 1;
+}
+
+.notif-message {
+  font-size: 13.5px;
+  margin-bottom: 2px;
+  line-height: 1.4;
+}
+
+.notif-message--read {
+  font-weight: 400;
+  color: var(--text-soft);
+}
+
+.notif-message--unread {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.notif-timestamp {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* New text badge */
+.notif-badge-new {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent) !important;
+  background: transparent !important; /* Removed background */
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  flex-shrink: 0;
+}

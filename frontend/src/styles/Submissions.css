@@ -1,0 +1,174 @@
+/* Submissions.css */
+
+/* Page header */
+.sub-header {
+  margin-bottom: 12px; /* Tightened vertical gap */
+}
+
+.sub-header h1 {
+  font-size: 16px; /* Scaled text size */
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Teal accent band */
+.sub-header h1::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+.sub-header p {
+  font-size: 13px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+/* Table card */
+.sub-table-card {
+  background: var(--background) !important; /* Flattens card panel */
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: none !important;            /* Removes shadows */
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+.sub-loading,
+.sub-empty {
+  padding: 16px;
+  color: var(--text-soft);
+  background: var(--background);
+  font-size: 13px;
+}
+
+.sub-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sub-table thead tr {
+  background: var(--surface-hover);
+}
+
+.sub-table thead th {
+  background: var(--surface-hover);
+  text-align: left;
+  padding: 10px 14px; /* Compact padding */
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid var(--border-strong);
+}
+
+.sub-table tbody tr {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+/* Prevents white row backgrounds */
+.sub-table tbody tr:nth-child(odd),
+.sub-table tbody tr:nth-child(even) {
+  background: var(--surface) !important; /* Nested */
+}
+
+.sub-table tbody tr:hover {
+  background: var(--surface-hover) !important;
+}
+
+.sub-table tbody tr:hover td {
+  color: var(--text) !important;
+}
+
+.sub-table-name {
+  padding: 8px 14px; /* Compact row sizes */
+  font-size: 13.5px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sub-table-muted {
+  padding: 8px 14px;
+  font-size: 13.5px;
+  color: var(--text-soft);
+}
+
+.sub-table-small {
+  padding: 8px 14px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+}
+
+.sub-table-status {
+  padding: 8px 14px;
+}
+
+/* Status badge */
+.sub-status-badge {
+  display: inline-block;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.sub-status-badge[data-status="Draft"] {
+  color: var(--text-soft) !important;
+}
+
+.sub-status-badge[data-status="Submitted"] {
+  color: var(--accent) !important;
+}
+
+.sub-status-badge[data-status="Under Review"] {
+  color: var(--accent) !important;
+}
+
+.sub-status-badge[data-status="Changes Requested"] {
+  color: var(--warning) !important;
+}
+
+.sub-status-badge[data-status="Approved"] {
+  color: var(--success) !important;
+}
+
+.sub-status-badge[data-status="Cancelled"] {
+  color: var(--danger-text) !important;
+}
+
+.sub-table-action {
+  padding: 8px 14px;
+}
+
+.sub-btn-view {
+  height: 28px; /* Compact action row */
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.sub-btn-view:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--accent);
+}

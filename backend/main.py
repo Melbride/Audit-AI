@@ -57,13 +57,6 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls", "pdf", "docx"}
 
-# Internal columns the system adds for its own bookkeeping (row tracking for the
-# corrected-Excel diff flow, duplicate-row marking during cleaning) that should
-# never be treated as real data and should never reach column detection or mapping.
-# These only end up "visible" as real columns if someone uploads an already-exported/
-# cleaned workbook through the normal upload flow instead of "Upload Corrected File" —
-# the corrected-Excel flow already knows to strip these by name, but the normal
-# upload flow has no equivalent protection without this filter.
 RESERVED_INTERNAL_COLUMNS = {"_row_id", "_is_duplicate"}
 
 def hash_password(password: str):
@@ -134,9 +127,6 @@ def read_file_to_df(save_path: str, ext: str):
         df = df.dropna(axis=1, how='all')
         df = df.loc[:, ~(df == '').all()]
         df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
-        # Drop any reserved internal column (e.g. _row_id from a previously
-        # exported workbook re-uploaded by mistake) before it's ever treated as
-        # real data — see RESERVED_INTERNAL_COLUMNS for why this exists.
         df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
     return df
 
@@ -227,12 +217,6 @@ def filter_acknowledged_issues(report: dict, file_id: str, client_id: str, file_
     return rebuild_report_counts(report)
 
 def apply_saved_corrections(df: pd.DataFrame, mapping: dict, corrections: list) -> pd.DataFrame:
-    """
-    Apply every saved correction to the source dataframe before cleaning runs.
-    Handles cell-value corrections, row deletions (column_name == "_row_deleted"),
-    and column deletions (column_name starts with "_column_deleted:"). Deletions are
-    applied first so they persist on every future cleaning run, not just one response.
-    """
     if not corrections:
         return df
 
@@ -259,15 +243,11 @@ def apply_saved_corrections(df: pd.DataFrame, mapping: dict, corrections: list) 
     if rows_to_drop:
         df = df.drop(index=[r for r in rows_to_drop if r in df.index])
     if columns_to_drop:
-        # Translate standard mapped names back to original column names
-        # because df still has original names at this point (before rename_columns runs)
         resolved_columns_to_drop = []
         for col_name in columns_to_drop:
-            # Check if it's already an original column name
             if col_name in df.columns:
                 resolved_columns_to_drop.append(col_name)
             else:
-                # Look up the original name from the mapping
                 original = standard_to_original.get(col_name)
                 if original and original in df.columns:
                     resolved_columns_to_drop.append(original)
@@ -316,27 +296,12 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cleaning failed: {str(e)}")
     report = enrich_issues_with_ids(report, file_id, client_id, file_type)
-
-    # IMPORTANT: remove acknowledged FIRST
     report = filter_acknowledged_issues(report, file_id, client_id, file_type)
-
-    # recompute counts AFTER filtering
     report = rebuild_report_counts(report)
-
-    # SINGLE SOURCE OF TRUTH for can_proceed: every severity (high, medium, AND
-    # info) must be resolved before proceeding. info-severity issues (currently
-    # just ambiguous-date warnings) still require an explicit action — either
-    # "Correct as-is" (acknowledge-issue, filtered out above) or an actual cell
-    # edit (which changes original_value, so the issue won't reappear on the
-    # next clean cycle) — they are NOT silently exempt. This prevents an
-    # auditor from clearing only the high/medium issues and proceeding without
-    # ever having looked at an ambiguous date. Every endpoint below reads this
-    # single value instead of recomputing it differently.
     report["can_proceed"] = report["total_issues"] == 0
 
     return cleaned_df, report
 
-# ── MODELS ────────────────────────────────────────────────────────────────────
 class Client(BaseModel):
     company_name: str
     contact_person: Optional[str] = None
@@ -468,9 +433,6 @@ async def upload_file_ai(
         df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
         df = df.dropna(axis=1, how='all')
         df = df.loc[:, ~(df == '').all()]
-        # Drop any reserved internal column (e.g. _row_id from a previously
-        # exported workbook re-uploaded by mistake through the normal upload
-        # flow) before it's ever surfaced for column detection.
         df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
@@ -544,16 +506,6 @@ async def detect_columns_endpoint(
             for col in columns_list
             if col in saved_mapping
         }
-        # Require that EVERY uploaded column actually matched something in the saved
-        # mapping before trusting this as a real cache hit. A fingerprint match alone
-        # isn't enough proof — it's possible for this exact fingerprint to have been
-        # seen before (e.g. from an earlier accidental upload of an already-cleaned/
-        # exported file) while the saved MAPPING is still keyed by a completely
-        # different set of column names (the original raw headers). In that case
-        # filtered_mapping would be empty or only partially filled, and returning it
-        # as-is silently produces a mapping table with missing or zero rows instead
-        # of a real detection result. Falling through to full LLM detection below is
-        # the safe behavior whenever the match isn't complete.
         if filtered_mapping and len(filtered_mapping) == len(columns_list):
             result = build_detection_result(columns_list, filtered_mapping, sample_values, fill_rates_dict)
             result["file_id"] = file_id
@@ -727,10 +679,6 @@ async def submit_corrected_excel(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:
-        # Clean up the temp file, but never let a cleanup failure crash the request.
-        # On Windows, openpyxl can briefly hold a file handle even after close() in some
-        # edge cases (antivirus scanning, OS-level delays) — a delete failure here should
-        # not lose the auditor's corrections, which by this point may already be processed.
         try:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
@@ -741,52 +689,72 @@ async def submit_corrected_excel(
     deleted_row_ids = diff_result["deleted_row_ids"]
     deleted_columns = diff_result["deleted_columns"]
     renamed_columns = diff_result["renamed_columns"]
-    ambiguous_changes = diff_result["ambiguous_changes"]
+    unresolved_columns = diff_result.get("unresolved_columns", [])
 
-    # More than one column's identity changed at once (more than one name missing
-    # and/or more than one name added). We don't guess which old name maps to which
-    # new name in this case — doing so by position previously misattributed renames
-    # to completely unrelated columns whenever the schema had drifted between the
-    # snapshot and this upload (e.g. resolving a column elsewhere introduced a new
-    # derived field). Ask for a fresh workbook instead of risking silent data loss.
-    if ambiguous_changes:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Multiple column changes were detected at once, so the exact rename(s) "
-                "couldn't be determined safely. This usually happens when the downloaded "
-                "workbook is out of date relative to the current data (for example, if "
-                "another correction round already changed the columns since this file was "
-                "downloaded). Please download a fresh copy of the workbook, reapply your "
-                "edits there, and upload that instead."
-            )
+    # unresolved_columns lists any new column name that appeared but couldn't be
+    # confidently traced back to a missing column (including genuine ties between two
+    # equally-plausible candidates). This does NOT block the rest of the upload — any
+    # rename that WAS confidently resolved, plus all corrections and deletions, still
+    # get applied below. We only need to warn the auditor about the specific column(s)
+    # we couldn't safely interpret.
+    unresolved_warning = None
+    if unresolved_columns:
+        names = ", ".join(f"'{c}'" for c in unresolved_columns)
+        unresolved_warning = (
+            f"Could not confidently determine what happened to {names} — this usually "
+            f"means either it's a genuinely new column we don't recognize, or its rename "
+            f"couldn't be told apart from another change in this upload with confidence. "
+            f"Everything else in this upload was applied. If {names} was meant to be a "
+            f"rename, please try renaming just that one column by itself in a follow-up "
+            f"upload."
         )
 
-    # A single, unambiguous rename was detected. Before applying it, make sure the new
-    # name doesn't collide with a `mapped_to` value already used by a DIFFERENT column —
+    # Before applying any renames, make sure none of the new names collide with a
+    # `mapped_to` value already used by a DIFFERENT column not involved in this round —
     # that would create two columns sharing one name after rename_columns runs, which
     # crashes deep inside cleaning (the exact problem detect_duplicate_mappings guards
-    # against for the initial mapping). Reject clearly here instead of letting that happen.
+    # against for the initial mapping). Also check renames don't collide WITH EACH OTHER
+    # (two different old columns both being renamed to the same new name in one upload).
     if renamed_columns:
-        old_name, new_name = next(iter(renamed_columns.items()))
-        colliding_column = next(
-            (
-                original_col for original_col, info in mapping.items()
-                if original_col != old_name
-                and isinstance(info, dict)
-                and info.get("mapped_to") == new_name
-            ),
-            None,
-        )
-        if colliding_column:
+        new_name_targets = {}
+        for old_name, new_name in renamed_columns.items():
+            new_name_targets.setdefault(new_name, []).append(old_name)
+        mutual_collisions = {n: olds for n, olds in new_name_targets.items() if len(olds) > 1}
+        if mutual_collisions:
+            descriptions = "; ".join(
+                f"{', '.join(repr(o) for o in olds)} were all renamed to '{n}'"
+                for n, olds in mutual_collisions.items()
+            )
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Cannot rename '{old_name}' to '{new_name}': that name is already used "
-                    f"by column '{colliding_column}'. Please choose a different name for "
-                    f"one of these two columns and re-upload."
+                    f"Cannot apply these renames: {descriptions}. Each column needs a "
+                    f"unique name. Please give each one a different name and re-upload."
                 )
             )
+
+        for old_name, new_name in renamed_columns.items():
+            # Does new_name already belong to some OTHER column not part of this
+            # rename batch (i.e. a column whose mapped_to is new_name but which isn't
+            # the very column we're renaming away from old_name)?
+            colliding_column = next(
+                (
+                    original_col for original_col, info in mapping.items()
+                    if isinstance(info, dict)
+                    and info.get("mapped_to") == new_name
+                    and info.get("mapped_to") != old_name
+                ),
+                None,
+            )
+            if colliding_column:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Cannot rename '{old_name}' to '{new_name}': that name is already used "
+                        f"by column '{colliding_column}'. Please choose a different name for "
+                        f"one of these two columns and re-upload."
+                    )
+                )
 
     if not corrections and not deleted_row_ids and not deleted_columns and not renamed_columns:
         raise HTTPException(
@@ -813,11 +781,8 @@ async def submit_corrected_excel(
         ]
         save_cleaning_corrections(file_id, client_id, file_type, column_deletion_records, corrected_by)
 
-    # Apply the rename directly to the saved mapping — same treatment whether the
-    # column was previously "unknown" or already fully resolved. The auditor typing a
-    # new header in Excel is the same deliberate action either way, and we've already
-    # confirmed above it's unambiguous and collision-free, so there's no need to gate
-    # it further or route it through a separate mapping screen.
+    # Apply EVERY confidently-resolved rename directly to the saved mapping — same
+    # treatment whether each column was previously "unknown" or already fully resolved.
     #
     # IMPORTANT: `old_name` from the diff is the CLEANED-DATA column name the auditor
     # saw in the workbook — for an unresolved column that's still its original raw
@@ -826,52 +791,50 @@ async def submit_corrected_excel(
     # `mapping[old_name] = ...` for a resolved column creates a bogus new entry under a
     # key that never existed in the source file, while leaving the real entry untouched
     # — silently failing to apply the rename at all. We must look up which original
-    # column currently has mapped_to == old_name first.
+    # column currently has mapped_to == old_name first, for EACH rename in this batch.
     if renamed_columns:
-        old_name, new_name = next(iter(renamed_columns.items()))
-
-        original_key = next(
-            (oc for oc, info in mapping.items()
-             if isinstance(info, dict) and info.get("mapped_to") == old_name),
-            None,
-        )
-        if original_key is None:
-            # Not found as a mapped_to value anywhere — this means old_name IS itself
-            # the original raw column key (the unresolved-column case, where mapped_to
-            # was "unknown" and the column kept its original name throughout cleaning).
-            original_key = old_name
-
         updated_mapping = dict(mapping)
-        existing_info = updated_mapping.get(original_key, {})
-        updated_mapping[original_key] = {
-            **(existing_info if isinstance(existing_info, dict) else {}),
-            "mapped_to": new_name,
-            # Keep the existing field_type if one was already set (e.g. this column was
-            # already resolved as text/date/numeric) — a rename alone doesn't change what
-            # kind of data is in the column. Only default to "text" if it was genuinely
-            # unset/unknown, since the auditor didn't get to pick a type through this path.
-            "field_type": (
-                existing_info.get("field_type")
-                if isinstance(existing_info, dict) and existing_info.get("field_type") not in (None, "unknown")
-                else "text"
-            ),
-        }
+        for old_name, new_name in renamed_columns.items():
+            original_key = next(
+                (oc for oc, info in updated_mapping.items()
+                 if isinstance(info, dict) and info.get("mapped_to") == old_name),
+                None,
+            )
+            if original_key is None:
+                # Not found as a mapped_to value anywhere — this means old_name IS itself
+                # the original raw column key (the unresolved-column case, where mapped_to
+                # was "unknown" and the column kept its original name throughout cleaning).
+                original_key = old_name
+
+            existing_info = updated_mapping.get(original_key, {})
+            updated_mapping[original_key] = {
+                **(existing_info if isinstance(existing_info, dict) else {}),
+                "mapped_to": new_name,
+                # Keep the existing field_type if one was already set — a rename alone
+                # doesn't change what kind of data is in the column. Only default to
+                # "text" if it was genuinely unset/unknown.
+                "field_type": (
+                    existing_info.get("field_type")
+                    if isinstance(existing_info, dict) and existing_info.get("field_type") not in (None, "unknown")
+                    else "text"
+                ),
+            }
         save_mapping(client_id, file_type, updated_mapping, corrected_by)
         mapping = updated_mapping
 
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     # Refresh the snapshot so the NEXT diff round compares against today's actual
     # state, not an increasingly stale baseline — this is what keeps future renames
-    # and corrections unambiguous instead of drifting into ambiguous_changes territory.
+    # and corrections unambiguous instead of drifting into unresolved territory.
     save_cleaning_snapshot(file_id, client_id, file_type, cleaned_df)
 
-    rename_summary = (
-        f", column '{next(iter(renamed_columns.keys()))}' renamed to "
-        f"'{next(iter(renamed_columns.values()))}' in the mapping"
-        if renamed_columns else ""
-    )
+    if renamed_columns:
+        rename_descriptions = "; ".join(f"'{o}' renamed to '{n}'" for o, n in renamed_columns.items())
+        rename_summary = f", {rename_descriptions} in the mapping"
+    else:
+        rename_summary = ""
 
-    return {
+    response = {
         "file_id": file_id,
         "client_id": client_id,
         "file_type": file_type,
@@ -882,12 +845,16 @@ async def submit_corrected_excel(
         "rows_deleted": deleted_row_ids,
         "columns_deleted": deleted_columns,
         "columns_renamed": renamed_columns,
+        "unresolved_columns": unresolved_columns,
         "message": (
             f"{len(corrections)} correction(s), {len(deleted_row_ids)} row deletion(s), "
             f"and {len(deleted_columns)} column deletion(s) applied from the uploaded file"
             f"{rename_summary}. File re-cleaned successfully."
         )
     }
+    if unresolved_warning:
+        response["warning"] = unresolved_warning
+    return response
 
 @app.post("/clean/acknowledge-issue")
 async def acknowledge_issue_endpoint(
@@ -942,7 +909,6 @@ async def submit_inline_corrections_endpoint(
         "message": f"{len(corrections_list)} correction(s) saved and re-cleaned."
     }
 
-# ── CLIENTS ───────────────────────────────────────────────────────────────────
 @app.get("/clients")
 def get_clients(db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1007,7 +973,6 @@ def delete_client(client_id: int, db=Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Could not delete client: {str(e)}")
 
-# ── USERS ─────────────────────────────────────────────────────────────────────
 @app.get("/users")
 def get_users(db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1068,7 +1033,6 @@ def assign_user_to_client(user_id: int, client_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "User assigned to client"}
 
-# ── AUTH ──────────────────────────────────────────────────────────────────────
 @app.post("/auth/login")
 def login(req: LoginRequest, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1112,7 +1076,6 @@ def password_reset_confirm(req: PasswordResetConfirm, db=Depends(get_db)):
     db.commit()
     return {"message": "Password reset successful"}
 
-# ── COLUMN MAPPINGS ───────────────────────────────────────────────────────────
 @app.get("/column-mappings")
 def get_all_mappings(db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1154,7 +1117,6 @@ def delete_mapping(mapping_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Column mapping deleted"}
 
-# ── ENGAGEMENTS ───────────────────────────────────────────────────────────────
 @app.get("/engagements")
 def get_engagements(db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1213,7 +1175,6 @@ def delete_engagement(engagement_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Engagement deleted"}
 
-# ── ENGAGEMENT TEAM ───────────────────────────────────────────────────────────
 @app.get("/engagements/{engagement_id}/team")
 def get_engagement_team(engagement_id: int, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1240,7 +1201,6 @@ def remove_team_member(engagement_id: int, user_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Team member removed"}
 
-# ── AUDIT SECTIONS ────────────────────────────────────────────────────────────
 @app.get("/engagements/{engagement_id}/sections")
 def get_audit_sections(engagement_id: int, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1278,7 +1238,6 @@ def delete_audit_section(section_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Audit section deleted"}
 
-# ── SUBMISSIONS ───────────────────────────────────────────────────────────────
 @app.get("/audit-sections/{section_id}/latest-submission")
 def get_section_latest_submission(section_id: int, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1406,7 +1365,6 @@ def delete_submission(submission_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Submission deleted"}
 
-# ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
 @app.get("/notifications/{user_id}")
 def get_user_notifications(user_id: int, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1434,7 +1392,6 @@ def mark_all_read(user_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "All notifications marked as read"}
 
-# ── FILE UPLOAD ───────────────────────────────────────────────────────────────
 @app.post("/clients/{client_id}/upload")
 def upload_client_file(client_id: int, file: UploadFile = File(...), db=Depends(get_db)):
     allowed_types = ["xlsx", "xls", "csv", "pdf", "tiff", "tif", "jpg", "jpeg", "png", "xml", "json", "txt"]
@@ -1467,7 +1424,6 @@ def get_all_files(db=Depends(get_db)):
     """)
     return cursor.fetchall()
 
-# ── RUN ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("Audit:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

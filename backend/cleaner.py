@@ -191,10 +191,10 @@ def clean_dates(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame:
                     "row_index": idx,
                     "original_value": str(original_value),
                     "issue": (
-                        f"Ambiguous date '{original_value}' in '{col}' — this could mean "
+                        f"Ambiguous date '{original_value}' in '{col}', this could mean "
                         f"{day_first_reading} (DD/MM/YYYY) or {month_first_reading} (MM/DD/YYYY) "
                         f"and there's no way to tell which from the text alone. We've assumed "
-                        f"DD/MM/YYYY ({day_first_reading}) for now — please confirm this is correct, "
+                        f"DD/MM/YYYY ({day_first_reading}) for now,please confirm this is correct, "
                         f"or correct the cell to an unambiguous format (e.g. spell out the month, "
                         f"like '5 Jan 2024')."
                     ),
@@ -222,7 +222,7 @@ def clean_dates(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame:
                     "column": col,
                     "row_index": idx,
                     "original_value": str(original_value),
-                    "issue": f"Invalid date '{original_value}' — check this cell and correct it to DD/MM/YYYY format (e.g. 15/03/2024)",
+                    "issue": f"Invalid date '{original_value}' check this cell and correct it to DD/MM/YYYY format (e.g. 15/03/2024)",
                     "severity": "high"
                 })
     return df
@@ -503,7 +503,7 @@ def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict
                         "column": col,
                         "row_index": idx,
                         "original_value": "",
-                        "issue": f"Missing value in '{col}' — this field should not be empty. Check the source data and fill in the correct value.",
+                        "issue": f"Missing value in '{col}', this field should not be empty. Check the source data and fill in the correct value.",
                         "severity": "medium"
                     })
 
@@ -528,7 +528,7 @@ def handle_duplicates(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataF
             "column": "all columns",
             "row_index": idx,
             "original_value": str(df.loc[idx].to_dict()),
-            "issue": "This row is an exact duplicate of another row — check whether it was entered twice and remove the extra copy.",
+            "issue": "This row is an exact duplicate of another row, check whether it was entered twice and remove the extra copy.",
             "severity": "high"
         })
 

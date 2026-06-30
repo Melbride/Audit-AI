@@ -1,0 +1,286 @@
+
+/* Page header */
+.cl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px; /* Reduced vertical space */
+}
+
+.cl-title {
+  font-size: 16px; /* Scaled header */
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Teal section indicator strip */
+.cl-title::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+.cl-subtitle {
+  color: var(--text-soft);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Add button */
+.cl-add-btn {
+  height: 32px; /* Standardized height */
+  padding: 0 16px;
+  background: var(--primary);
+  color: var(--background); /* High contrast text */
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition);
+}
+
+.cl-add-btn:hover {
+  background: var(--primary-hover);
+}
+
+/* Table card */
+.cl-table-wrap {
+  background: var(--background) !important; 
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: none !important;            
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+.cl-loading,
+.cl-empty {
+  padding: 16px;
+  color: var(--text-soft);
+  font-size: 13px;
+  background: var(--background);
+}
+
+/* Table Matrix Setup */
+.cl-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cl-table thead tr {
+  background: var(--surface-hover);
+}
+
+.cl-table th {
+  background: var(--surface-hover);
+  text-align: left;
+  padding: 10px 14px; /* Compact padding */
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid var(--border-strong);
+}
+
+/* Prevents white row backgrounds */
+.cl-table tbody tr,
+.cl-table tbody tr:nth-child(odd),
+.cl-table tbody tr:nth-child(even) {
+  background: var(--surface) !important; /* Elevated */
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.cl-table tbody tr:hover {
+  background: var(--surface-hover) !important;
+}
+
+.cl-table td {
+  padding: 8px 14px; /* Compact row sizes */
+  font-size: 13.5px;
+  color: var(--text-soft);
+  vertical-align: middle;
+}
+
+.cl-table tbody tr:hover td {
+  color: var(--text);
+}
+
+.cl-td-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cl-td-status--active {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.cl-td-status--inactive {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Row action buttons */
+.cl-btn-edit {
+  background: none;
+  border: none;
+  color: var(--accent); /* Sky Blue link */
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  margin-right: 12px;
+  padding: 0;
+  transition: color var(--transition);
+}
+
+.cl-btn-edit:hover {
+  text-decoration: underline;
+  color: var(--accent-hover);
+}
+
+.cl-btn-delete {
+  background: none;
+  border: none;
+  color: var(--danger-text); /* Coral exception label */
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  transition: color var(--transition);
+}
+
+.cl-btn-delete:hover {
+  text-decoration: underline;
+  color: var(--danger); /* Crimson on delete */
+}
+
+/* Modal overlay */
+.cl-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.75); /* Darkened for popups */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.cl-modal {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 20px 24px;
+  width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.cl-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 16px 0;
+}
+
+/* Form fields */
+.cl-form-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+  margin-bottom: 6px;
+}
+
+.cl-form-input,
+.cl-form-select {
+  width: 100%;
+  height: 34px; /* Balanced height */
+  padding: 0 10px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--background);
+  box-sizing: border-box;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.cl-form-select {
+  cursor: pointer;
+}
+
+.cl-form-input:focus,
+.cl-form-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+}
+
+/* Modal footer buttons */
+.cl-modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.cl-btn-cancel {
+  flex: 1;
+  height: 34px;
+  background: var(--surface-hover);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition);
+}
+
+.cl-btn-cancel:hover {
+  background: var(--border);
+}
+
+.cl-btn-save {
+  flex: 1;
+  height: 34px;
+  background: var(--primary);
+  color: var(--background);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition);
+}
+
+.cl-btn-save:hover {
+  background: var(--primary-hover);
+}
+
+.cl-btn-save:disabled {
+  background: var(--border-strong);
+  color: var(--muted);
+  opacity: 0.4;
+  cursor: not-allowed;
+}

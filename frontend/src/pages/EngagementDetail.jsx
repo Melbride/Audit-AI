@@ -1,37 +1,14 @@
 import { useState, useEffect } from "react";
-import API from "../api";
-
-const colors = {
-  primary: "#1E3A5F",
-  secondary: "#2E86C1",
-  accent: "#3498DB",
-  background: "#F4F6F9",
-  white: "#FFFFFF",
-  text: "#2C3E50",
-  success: "#27AE60",
-  warning: "#F39C12",
-  danger: "#E74C3C",
-  muted: "#95A5A6",
-};
-
-const statusColors = {
-  Draft: colors.muted,
-  "Under Review": colors.accent,
-  "Changes Requested": colors.warning,
-  Approved: colors.success,
-  Cancelled: colors.danger,
-};
-
-const btnStyle = (color) => ({
-  padding: "6px 14px",
-  fontSize: "13px",
-  fontWeight: "600",
-  color,
-  background: "transparent",
-  border: `1px solid ${color}`,
-  borderRadius: "6px",
-  cursor: "pointer",
-});
+import { useParams, useNavigate } from "react-router-dom";
+import {
+  getEngagement,
+  getAuditSections,
+  getSectionLatestSubmission,
+  updateSubmissionStatus,
+  createSubmission,
+  sendToClient,
+} from "../services/api";
+import "../styles/EngagementDetail.css";
 
 const WORKFLOW = [
   "Accountant",
@@ -43,7 +20,10 @@ const WORKFLOW = [
   "Quality Reviewer",
 ];
 
-export default function EngagementDetail({ engagementId, user, onNavigate }) {
+export default function EngagementDetail({ user }) {
+  const { engagementId } = useParams();
+  const navigate = useNavigate();
+
   const [engagement, setEngagement] = useState(null);
   const [sections, setSections] = useState([]);
   const [submissions, setSubmissions] = useState({});
@@ -58,52 +38,75 @@ export default function EngagementDetail({ engagementId, user, onNavigate }) {
 
   const loadData = async () => {
     setLoading(true);
+
     try {
-      const eng = await API.getEngagement(engagementId);
-      setEngagement(eng);
-      const secs = await API.getAuditSections(engagementId);
-      const list = Array.isArray(secs) ? secs : [];
+      const eng = await getEngagement(engagementId);
+      setEngagement(eng.data);
+
+      const secs = await getAuditSections(engagementId);
+      const list = Array.isArray(secs.data) ? secs.data : [];
+
       setSections(list);
+
       const entries = await Promise.all(
-        list.map(async (sec) => [sec.section_id, await API.getSectionLatestSubmission(sec.section_id)])
+        list.map(async (section) => [
+          section.section_id,
+          (await getSectionLatestSubmission(section.section_id)).data,
+        ])
       );
+
       setSubmissions(Object.fromEntries(entries));
     } catch (err) {
       console.error("Failed to load engagement detail", err);
     }
+
     setLoading(false);
   };
 
-  const handleAction = async (section, submission, newStatus, newStage, notes = null) => {
+  const handleAction = async (
+    section,
+    submission,
+    newStatus,
+    newStage,
+    notes = null
+  ) => {
     if (!user) return;
+
     setActingOn(section.section_id);
+
     try {
       if (submission) {
-        await API.updateSubmissionStatus(submission.submission_id, {
+        await updateSubmissionStatus(submission.submission_id, {
           status: newStatus,
           current_stage: newStage,
           notes,
-          updated_by: user?.user_id,
+          updated_by: user.user_id,
         });
       } else {
-        await API.createSubmission({
+        await createSubmission({
           engagement_id: engagementId,
           section_id: section.section_id,
-          submitted_by: user?.user_id,
+          submitted_by: user.user_id,
           status: newStatus,
           current_stage: newStage,
           notes,
         });
       }
+
       await loadData();
     } catch (err) {
       console.error("Failed to update submission", err);
     }
+
     setActingOn(null);
   };
 
+  const getStatusClass = (status) =>
+    status.toLowerCase().replace(/\s+/g, "-");
+
   const renderActions = (section, submission) => {
     if (!user) return null;
+
     const stage = submission?.current_stage || "Accountant";
     const status = submission?.status || "Draft";
     const isActing = actingOn === section.section_id;
@@ -111,154 +114,277 @@ export default function EngagementDetail({ engagementId, user, onNavigate }) {
 
     if (role === "Admin") {
       return (
-        <span style={{ fontSize: "13px", color: colors.muted }}>
-          {status === "Approved" ? "Approved ✓" : status === "Cancelled" ? "Cancelled ✗" : `Waiting on ${stage}`}
+        <span className="workflow-text">
+          {status === "Approved"
+            ? "Approved"
+            : status === "Cancelled"
+            ? "Cancelled"
+            : `Waiting on ${stage}`}
         </span>
       );
     }
+
     if (status === "Approved") {
-      return <span style={{ fontSize: "13px", fontWeight: "600", color: colors.success }}>Approved ✓</span>;
+      return (
+        <span className="workflow-approved">
+          Approved
+        </span>
+      );
     }
+
     if (status === "Cancelled") {
-      return <span style={{ fontSize: "13px", fontWeight: "600", color: colors.danger }}>Cancelled ✗</span>;
+      return (
+        <span className="workflow-cancelled">
+          Cancelled
+        </span>
+      );
     }
+
     if (role !== stage) {
-      return <span style={{ fontSize: "13px", color: colors.muted }}>Waiting on {stage}</span>;
+      return (
+        <span className="workflow-text">
+          Waiting on {stage}
+        </span>
+      );
     }
 
     const currentIndex = WORKFLOW.indexOf(stage);
-    const prevStage = currentIndex > 0 ? WORKFLOW[currentIndex - 1] : null;
-    const nextStage = currentIndex < WORKFLOW.length - 1 ? WORKFLOW[currentIndex + 1] : null;
-    const isLastStage = currentIndex === WORKFLOW.length - 1;
+
+    const prevStage =
+      currentIndex > 0 ? WORKFLOW[currentIndex - 1] : null;
+
+    const nextStage =
+      currentIndex < WORKFLOW.length - 1
+        ? WORKFLOW[currentIndex + 1]
+        : null;
+
+    const isLastStage =
+      currentIndex === WORKFLOW.length - 1;
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: "240px" }}>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+      <div className="workflow-actions">
+        <div className="workflow-buttons">
           {isLastStage ? (
             <button
+              className="action-btn success"
               disabled={isActing}
-              onClick={() => handleAction(section, submission, "Approved", null, noteDrafts[section.section_id] || null)}
-              style={btnStyle(colors.success)}
+              onClick={() =>
+                handleAction(
+                  section,
+                  submission,
+                  "Approved",
+                  null,
+                  noteDrafts[section.section_id] || null
+                )
+              }
             >
               {isActing ? "Approving..." : "Approve"}
             </button>
           ) : (
             <button
+              className="action-btn secondary"
               disabled={isActing}
-              onClick={() => handleAction(section, submission, "Under Review", nextStage, noteDrafts[section.section_id] || null)}
-              style={btnStyle(colors.secondary)}
+              onClick={() =>
+                handleAction(
+                  section,
+                  submission,
+                  "Under Review",
+                  nextStage,
+                  noteDrafts[section.section_id] || null
+                )
+              }
             >
-              {isActing ? "Forwarding..." : `Forward to ${nextStage}`}
+              {isActing
+                ? "Forwarding..."
+                : `Forward to ${nextStage}`}
             </button>
           )}
+
           {prevStage && (
             <button
+              className="action-btn warning"
               disabled={isActing}
-              onClick={() => handleAction(section, submission, "Changes Requested", prevStage, noteDrafts[section.section_id] || null)}
-              style={btnStyle(colors.warning)}
+              onClick={() =>
+                handleAction(
+                  section,
+                  submission,
+                  "Changes Requested",
+                  prevStage,
+                  noteDrafts[section.section_id] || null
+                )
+              }
             >
               Return to {prevStage}
             </button>
           )}
+
           <button
+            className="action-btn danger"
             disabled={isActing}
-            onClick={() => handleAction(section, submission, "Cancelled", null, noteDrafts[section.section_id] || null)}
-            style={btnStyle(colors.danger)}
+            onClick={() =>
+              handleAction(
+                section,
+                submission,
+                "Cancelled",
+                null,
+                noteDrafts[section.section_id] || null
+              )
+            }
           >
             Cancel
           </button>
         </div>
+
         <input
+          className="note-input"
           type="text"
           placeholder="Add a note (optional)"
           value={noteDrafts[section.section_id] || ""}
-          onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [section.section_id]: e.target.value }))}
-          style={{ padding: "6px 10px", fontSize: "13px", border: "1px solid #ddd", borderRadius: "6px" }}
+          onChange={(e) =>
+            setNoteDrafts((prev) => ({
+              ...prev,
+              [section.section_id]: e.target.value,
+            }))
+          }
         />
       </div>
     );
   };
 
-  if (!engagementId) return <p style={{ padding: "24px", color: "#7f8c8d" }}>Select an engagement to view details.</p>;
-  if (loading) return <p style={{ padding: "24px", color: "#7f8c8d" }}>Loading engagement...</p>;
-  if (!user) return <p style={{ padding: "24px", color: "#7f8c8d" }}>Loading user...</p>;
-  if (!engagement) return <p style={{ padding: "24px", color: "#7f8c8d" }}>Engagement not found.</p>;
+  if (!engagementId) {
+    return (
+      <p className="empty-message">
+        Select an engagement to view details.
+      </p>
+    );
+  }
 
-  return (
-    <div>
+  if (loading) {
+    return (
+      <p className="loading-message">
+        Loading engagement...
+      </p>
+    );
+  }
+
+  if (!user) {
+    return (
+      <p className="loading-message">
+        Loading user...
+      </p>
+    );
+  }
+
+  if (!engagement) {
+    return (
+      <p className="error-message">
+        Engagement not found.
+      </p>
+    );
+  }
+
+    return (
+    <div className="engagement-detail">
       <button
-        onClick={() => onNavigate("engagements")}
-        style={{ background: "none", border: "none", color: colors.secondary, cursor: "pointer", marginBottom: "16px", fontSize: "14px", padding: 0 }}
+        className="back-button"
+        onClick={() => navigate("/engagements")}
       >
         ← Back to Engagements
       </button>
 
-      <div style={{ marginBottom: "24px" }}>
-        <h1 style={{ fontSize: "24px", fontWeight: "700", color: colors.text, marginBottom: "4px" }}>
-          {engagement.engagement_name}
-        </h1>
-        <p style={{ fontSize: "14px", color: "#7f8c8d" }}>
-          {engagement.company_name || "—"} · FY {engagement.financial_year || "—"}
+      <div className="engagement-header">
+        <h1>{engagement.engagement_name}</h1>
+
+        <p>
+          {engagement.company_name || "—"} · FY{" "}
+          {engagement.financial_year || "—"}
         </p>
       </div>
 
-      {["Engagement Partner", "Quality Reviewer", "Admin"].includes(user.role) &&
-        sections.some(sec => submissions[sec.section_id]?.status === "Approved") && (
-        <div style={{ marginBottom: "16px" }}>
-          <button
-            onClick={async () => {
-              try {
-                const res = await API.sendToClient(engagementId);
-                alert(res.message || "Email sent successfully");
-              } catch (err) {
-                alert("Failed to send email");
-              }
-            }}
-            style={{
-              padding: "10px 20px",
-              background: colors.success,
-              color: colors.white,
-              border: "none",
-              borderRadius: "8px",
-              fontSize: "14px",
-              fontWeight: "600",
-              cursor: "pointer",
-            }}
-          >
-            📧 Send Report to Client
-          </button>
-        </div>
-      )}
+      {["Engagement Partner", "Quality Reviewer", "Admin"].includes(
+        user.role
+      ) &&
+        sections.some(
+          (sec) =>
+            submissions[sec.section_id]?.status === "Approved"
+        ) && (
+          <div className="send-report">
+            <button
+              className="send-report-btn"
+              onClick={async () => {
+                try {
+                  const res = await sendToClient(engagementId);
 
-      <div style={{ background: colors.white, borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+                  alert(
+                    res.data?.message ||
+                      "Email sent successfully."
+                  );
+                } catch (err) {
+                  alert("Failed to send email.");
+                }
+              }}
+            >
+              Send Report to Client
+            </button>
+          </div>
+        )}
+
+      <div className="sections-card">
         {sections.length === 0 ? (
-          <p style={{ padding: "24px", color: "#7f8c8d" }}>No audit sections found for this engagement.</p>
+          <p className="empty-message">
+            No audit sections found for this engagement.
+          </p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="sections-table">
             <thead>
-              <tr style={{ background: "#FAFBFC", borderBottom: "1px solid #eee" }}>
-                {["Section", "Status", "Last Updated By", "Actions"].map((h) => (
-                  <th key={h} style={{ textAlign: "left", padding: "14px 20px", fontSize: "12px", fontWeight: "600", color: "#7f8c8d", textTransform: "uppercase" }}>{h}</th>
-                ))}
+              <tr>
+                <th>Section</th>
+                <th>Status</th>
+                <th>Last Updated By</th>
+                <th>Actions</th>
               </tr>
             </thead>
+
             <tbody>
               {sections.map((section) => {
-                const submission = submissions[section.section_id];
-                const status = submission?.status || "Draft";
+                const submission =
+                  submissions[section.section_id];
+
+                const status =
+                  submission?.status || "Draft";
+
                 return (
-                  <tr key={section.section_id} style={{ borderBottom: "1px solid #f5f5f5" }}>
-                    <td style={{ padding: "14px 20px", fontSize: "14px", color: colors.text, fontWeight: "500" }}>{section.section_name}</td>
-                    <td style={{ padding: "14px 20px" }}>
-                      <span style={{ fontSize: "12px", fontWeight: "600", color: statusColors[status] || colors.muted, background: `${statusColors[status] || colors.muted}1A`, padding: "4px 10px", borderRadius: "12px" }}>
+                  <tr key={section.section_id}>
+                    <td className="section-name">
+                      {section.section_name}
+                    </td>
+
+                    <td>
+                      <span
+                        className={`status-badge ${getStatusClass(
+                          status
+                        )}`}
+                      >
                         {status}
                       </span>
+
                       {submission?.notes && (
-                        <div style={{ fontSize: "12px", color: "#7f8c8d", marginTop: "4px" }}>"{submission.notes}"</div>
+                        <div className="status-note">
+                          "{submission.notes}"
+                        </div>
                       )}
                     </td>
-                    <td style={{ padding: "14px 20px", fontSize: "14px", color: "#7f8c8d" }}>{submission?.submitted_by_name || "—"}</td>
-                    <td style={{ padding: "14px 20px" }}>{renderActions(section, submission)}</td>
+
+                    <td className="updated-by">
+                      {submission?.submitted_by_name || "—"}
+                    </td>
+
+                    <td>
+                      {renderActions(
+                        section,
+                        submission
+                      )}
+                    </td>
                   </tr>
                 );
               })}

@@ -1,128 +1,242 @@
-/* ===========================================================
-   GENERAL CARD STYLES
-   =========================================================== */
-.relative-card { position: relative; }
+.page {
+    background: var(--background);
+    padding: 12px 20px 24px;
+    margin: 0;
+}
+
+/* Container Blocks */
+.card-clean-body,
+.relative-card {
+    position: relative;
+    max-width: 100%;
+    margin: 0 auto;
+    background: var(--background) !important; /* Flattens panel */
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px 24px !important;
+    box-shadow: none !important;              /* Removes depth */
+}
 
 .card-header-row {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 20px;
+    align-items: center;
+    margin-bottom: 24px !important;            /* Vertical spacing */
 }
 
-.card-header-row .title { margin: 0; border: none; padding: 0; }
-
-/* CLEANING COMPLETE PILL (TOP RIGHT) */
-.clean-complete-pill {
-    background-color: #EAFAF1;
-    color: #1F9D55;
-    padding: 6px 14px;
-    border-radius: 20px;
+.card-header-row .title {
+    margin: 0;
+    border: none;
+    padding: 0;
+    color: var(--text);
+    font-size: 14px;
     font-weight: 700;
-    font-size: 0.8rem;
-    border: 1px solid #A7F3D0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-header-row .title::before {
+    content: "";
+    width: 4px;
+    height: 14px;
+    background: var(--primary);
+    border-radius: 2px;
+}
+
+/* Status Text Items */
+.clean-complete-pill {
+    background: transparent !important;       /* Removes background */
+    color: var(--success) !important;          /* Plain text status */
+    padding: 0 !important;
+    border: none !important;
+    font-weight: 700;
+    font-size: 13px;
     white-space: nowrap;
 }
 
-/* ===========================================================
-   STAT GRID — CONSISTENT BLUE
-   =========================================================== */
+.status-note {
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 14px !important; /* Vertical spacing */
+    margin-bottom: 14px !important;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.status-note.success { color: var(--success); }
+.status-note.error { color: var(--danger-text); }
+
+/* Stats Grid Row Layout */
 .stats-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 14px;
-  margin-bottom: 20px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 20px !important;
 }
 
 .stat-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 15px;
-  text-align: center;
-  border-top: 4px solid #1E3A5F !important;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+    border-top: 4px solid var(--accent) !important; /* Top accent line */
+    box-shadow: none !important;
 }
 
 .stat-card h3 {
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: var(--primary);
-  margin: 0 0 5px 0;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--primary);
+    margin: 0 0 4px 0;
 }
 
 .stat-card p {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-soft);
+    text-transform: uppercase;
+    margin: 0;
+    letter-spacing: 0.3px;
 }
 
-/* ===========================================================
-   CORRECTION TOOLBAR (TOP PLACEMENT)
-   =========================================================== */
+/* Correction Toolbar and Action Controls */
 .correction-toolbar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 15px;
-    padding: 12px;
-    background: #f1f5f9;
-    border-radius: 8px;
+    gap: 10px;
+    margin-bottom: 16px !important;
+    padding: 8px 12px;
+    background: var(--surface);
     border: 1px solid var(--border);
+    border-radius: 8px;
 }
 
-.btn-secondary, .btn-inline {
-    background-color: #256D85 !important;
-    color: white !important;
-    height: 40px;
-    padding: 0 20px;
-    font-size: 0.85rem;
-    font-weight: 700;
+.btn-secondary, 
+.btn-inline {
+    height: 34px;                             /* Fixed layout button height line sizing */
+    padding: 0 16px;
+    background-color: var(--surface) !important;
+    border: 1px solid var(--border-strong) !important;
+    color: var(--text-soft) !important;
+    font-size: 12.5px;
+    font-weight: 600;
     border-radius: 6px;
-    border: none;
+    white-space: nowrap;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--transition), border-color var(--transition), color var(--transition);
 }
 
-.btn-secondary:hover, .btn-inline:hover {
-    background-color: #1E3A5F !important;
+.btn-secondary:hover, 
+.btn-inline:hover {
+    background-color: var(--surface-hover) !important;
+    border-color: var(--accent) !important;
+    color: var(--text) !important;
 }
 
-/* ===========================================================
-   PROCEED AREA (BOTTOM PLACEMENT)
-   =========================================================== */
+/* Proceed Footer Area Layout */
 .proceed-area {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    margin-top: 25px;
-    padding-top: 20px;
+    margin-top: 0;
+    padding-top: 12px;
     border-top: 1px solid var(--border);
 }
 
 .btn-proceed {
-    background-color: #1F9D55 !important;
-    color: white !important;
-    height: 45px;
-    padding: 0 30px;
+    height: 34px; /* Standard button height */
+    padding: 0 20px;
+    background-color: var(--primary) !important;
+    color: var(--background) !important; /* High contrast text */
+    font-size: 13px;
     font-weight: 700;
-    border-radius: 8px;
+    border-radius: 6px;
     border: none;
     cursor: pointer;
+    transition: background var(--transition);
+}
+
+.btn-proceed:hover {
+    background-color: var(--primary-hover) !important;
 }
 
 .btn-proceed:disabled {
-    background-color: #cbd5e1 !important;
+    background-color: var(--border-strong) !important;
+    color: var(--muted) !important;
     cursor: not-allowed;
+    opacity: 0.4;
+    transform: none !important;
 }
 
-/* Status Notes */
-.status-note { font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; }
-.status-note.success { color: #1F9D55; }
-.status-note.error { color: #DC2626; }
+/* Data table layout */
+.table-wrapper { 
+    overflow-x: auto; 
+    margin-top: 14px !important; /* Spacing below alerts */
+    margin-bottom: 24px !important; /* Spacing above footer */
+    border: 1px solid var(--border); 
+    border-radius: 8px; 
+    background: var(--surface) !important; /* Nested */
+}
 
-/* Table and General Styles */
-.table-wrapper { overflow-x: auto; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border); }
-thead { background: #f8fafc; }
-.row-flagged { background-color: #fef2f2 !important; }
+table { 
+    width: 100%; 
+    border-collapse: collapse; 
+}
+
+th {
+    background: var(--surface-hover);
+    color: var(--text);
+    padding: 10px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--border-strong);
+    text-align: left;
+}
+
+td { 
+    padding: 6px 12px; /* Compact row padding */
+    text-align: left; 
+    border-bottom: 1px solid var(--border); 
+    color: var(--text-soft);
+    font-size: 13px;
+    vertical-align: middle;
+}
+
+tbody tr,
+tbody tr:nth-child(odd),
+tbody tr:nth-child(even) {
+    background: var(--surface) !important;
+}
+
+tbody tr:hover {
+    background: var(--surface-hover) !important;
+}
+
+tbody tr:hover td {
+    color: var(--text);
+}
+
+/* Flagged error rows */
+.row-flagged,
+tbody tr.row-flagged:nth-child(odd),
+tbody tr.row-flagged:nth-child(even) { 
+    background-color: var(--danger-bg) !important; 
+}
+
+.row-flagged td {
+    color: var(--danger-text) !important;
+    border-bottom-color: rgba(239, 68, 68, 0.12) !important;
+}
+
+@media (max-width: 768px) {
+    .page { padding: 8px 12px; }
+    .card-clean-body { padding: 12px !important; }
+    .stats-grid { grid-template-columns: 1fr; gap: 8px; }
+}

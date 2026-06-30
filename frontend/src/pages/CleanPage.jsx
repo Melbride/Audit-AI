@@ -102,21 +102,21 @@ function CleanPage( ) {
 
     return (
         <div className="page">
-            <div className="header">
+            {/* <div className="header">
                 <h1 className="logo">Audit AI</h1>
                 <p className="subtitle">AI Financial Intelligence System</p>
-            </div>
+            </div> */}
 
             <div className="card relative-card">
                 <div className="card-header-row">
                     <h2 className="title">Data Cleaning Engine</h2>
-                    {cleanResult && <div className="clean-complete-pill">✔ Cleaning Complete</div>}
+                    {cleanResult && <div className="clean-complete-pill">Cleaning Complete</div>}
                 </div>
                 
                 <div className="info-row"><span className="info-label">File:</span><span>{currentUpload?.filename}</span></div>
                 <div className="info-row"><span className="info-label">Client:</span><span>{clientId}</span></div>
                 <div className="info-row"><span className="info-label">Rows:</span><span>{currentUpload?.rows}</span></div>
-                {error && <div className="error">⚠ {error}</div>}
+                {error && <div className="error">{error}</div>}
                 {!cleanResult && (
                     <button className="btn btn-primary" onClick={handleClean} disabled={cleaning}>
                         {cleaning ? 'Cleaning...' : 'Run Cleaning Engine'}
@@ -140,7 +140,7 @@ function CleanPage( ) {
                                 <strong>{report.total_issues} issues found</strong> download the workbook below to see all issues highlighted and fix them in Excel, then upload the corrected file back.
                             </div>
                         ) : (
-                            <div className="all-clean">✔ No issues found.</div>
+                            <div className="all-clean">No issues found.</div>
                         )}
                     </div>
 
@@ -165,7 +165,7 @@ function CleanPage( ) {
                         {/* This message now disappears after 5 seconds */}
                         {showDownloadMessage && (
                             <p className="status-note success">
-                                ✔ Workbook downloaded, fix the issues in Excel then upload it back.
+                                Workbook downloaded.
                             </p>
                         )}
 
@@ -192,7 +192,7 @@ function CleanPage( ) {
 
                         <div className="proceed-area">
                             {/* {!cleanResult.can_proceed && (
-                                <p className="status-note error">⚠ Fix all issues before proceeding to analysis.</p>
+                                <p className="status-note error">Fix all issues before proceeding to analysis.</p>
                             )} */}
                             <button className="btn btn-proceed" disabled={!cleanResult.can_proceed} onClick={() => navigate('/analysis', { state: { cleanResult, clientId, uploadResult: currentUpload } })}>
                                 Proceed to Analysis →

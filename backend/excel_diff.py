@@ -1,6 +1,7 @@
 from openpyxl import load_workbook
 
 ROW_ID_COLUMN = "_row_id"
+RENAME_MATCH_THRESHOLD = 0.9
 
 
 def values_differ(original_value, uploaded_value) -> bool:
@@ -24,6 +25,134 @@ def values_differ(original_value, uploaded_value) -> bool:
     return True
 
 
+def _match_score(snapshot_rows_by_id, uploaded_rows_by_id, shared_row_ids, old_name, new_name):
+    """
+    Compares one candidate old column against one candidate new column, across every
+    row present in both the snapshot and the upload. Returns (score, compared_count).
+
+    score is the fraction of compared values that are identical (0.0 to 1.0).
+    compared_count is how many rows actually contributed evidence — rows where BOTH
+    sides are blank are skipped entirely, since two unrelated empty columns would
+    otherwise "match" with no real evidence behind it. compared_count == 0 means this
+    candidate provided no information at all and must never be treated as a winner,
+    no matter how the score divides out.
+    """
+    compared = 0
+    matched = 0
+    for row_id in shared_row_ids:
+        old_value = snapshot_rows_by_id[row_id].get(old_name)
+        new_value = uploaded_rows_by_id[row_id].get(new_name)
+        old_is_blank = old_value is None or str(old_value).strip() == ""
+        new_is_blank = new_value is None or str(new_value).strip() == ""
+        if old_is_blank and new_is_blank:
+            continue
+        compared += 1
+        if not values_differ(old_value, new_value):
+            matched += 1
+    if compared == 0:
+        return 0.0, 0
+    return matched / compared, compared
+
+
+def _resolve_renames(missing_names, added_names, snapshot_rows_by_id, uploaded_rows_by_id):
+    """
+    Figures out which missing column name(s) each added column name actually replaces,
+    for ANY number of simultaneous renames in one upload — not just a single rename.
+
+    Approach: build a score for every (new_name, old_name) candidate pairing using the
+    underlying cell data (see _match_score), then greedily assign the single best-scoring
+    pairing first, remove both names from the pool, and repeat. This is the standard way
+    to safely resolve a many-to-many matching problem without needing anything more
+    elaborate — at each step we only commit to the pairing we're most confident about,
+    so an uncertain pairing never gets forced into matching just because it's the only
+    one left.
+
+    A pairing is only ever accepted if its score clears RENAME_MATCH_THRESHOLD (90%) AND
+    it actually has comparable data (compared > 0). Any new_name that can't be confidently
+    paired with a missing_name this way is left unresolved — the caller treats that
+    specific new_name as an unexplained addition (ambiguous), while every OTHER pairing
+    that WAS confidently resolved still goes through normally. This means one unclear
+    rename among several no longer blocks the rest, unlike the single-rename version
+    where any uncertainty failed the whole upload.
+
+    Returns (renamed_columns, unresolved_new_names) where renamed_columns is
+    {old_name: new_name} for every confidently-resolved pairing, and unresolved_new_names
+    is the set of added names that could not be confidently paired with anything.
+    """
+    if not added_names:
+        return {}, set()
+
+    shared_row_ids = set(snapshot_rows_by_id.keys()) & set(uploaded_rows_by_id.keys())
+
+    # Build every candidate pairing's score up front.
+    candidates = []  # list of (score, compared_count, new_name, old_name)
+    for new_name in added_names:
+        for old_name in missing_names:
+            score, compared = _match_score(
+                snapshot_rows_by_id, uploaded_rows_by_id, shared_row_ids, old_name, new_name
+            )
+            if compared > 0 and score >= RENAME_MATCH_THRESHOLD:
+                candidates.append((score, compared, new_name, old_name))
+
+    # Greedily assign the strongest pairing first, then the next-strongest among what's
+    # left, and so on. A pairing is only withheld as a genuine tie when something ELSE
+    # at the same score is contesting the SAME new_name or the SAME old_name — two
+    # unrelated pairings simply happening to share a score (e.g. two different, clean
+    # renames both scoring a perfect 1.0) are not in conflict with each other at all and
+    # must both be allowed through. The earlier version of this check treated any equal
+    # score as a tie regardless of whether the pairings overlapped, which incorrectly
+    # blocked every legitimate multi-rename case — only an actual overlap (two
+    # candidates both wanting the same new_name, or both wanting the same old_name)
+    # represents real, unresolvable uncertainty.
+    candidates.sort(key=lambda c: (-c[0], -c[1]))
+
+    renamed_columns = {}
+    claimed_new_names = set()
+    claimed_old_names = set()
+    blocked_new_names = set()
+    remaining = [c for c in candidates]
+
+    while remaining:
+        # Drop anything already claimed or already blocked by an earlier tie.
+        remaining = [
+            c for c in remaining
+            if c[2] not in claimed_new_names and c[3] not in claimed_old_names
+            and c[2] not in blocked_new_names
+        ]
+        if not remaining:
+            break
+
+        top_score, top_compared = remaining[0][0], remaining[0][1]
+        tied_at_top = [c for c in remaining if c[0] == top_score and c[1] == top_compared]
+
+        # Among the candidates tied at this score level, find genuine conflicts: more
+        # than one candidate wanting the same new_name, or more than one wanting the
+        # same old_name.
+        new_name_counts = {}
+        old_name_counts = {}
+        for score, compared, new_name, old_name in tied_at_top:
+            new_name_counts[new_name] = new_name_counts.get(new_name, 0) + 1
+            old_name_counts[old_name] = old_name_counts.get(old_name, 0) + 1
+
+        contested_new_names = {n for n, count in new_name_counts.items() if count > 1}
+        contested_old_names = {n for n, count in old_name_counts.items() if count > 1}
+
+        for score, compared, new_name, old_name in tied_at_top:
+            if new_name in contested_new_names or old_name in contested_old_names:
+                # Genuine, unresolvable conflict at this score level — withhold this
+                # new_name entirely rather than guess which old_name it really belongs to.
+                blocked_new_names.add(new_name)
+            else:
+                renamed_columns[old_name] = new_name
+                claimed_new_names.add(new_name)
+                claimed_old_names.add(old_name)
+
+        remaining = [c for c in remaining if c[0] != top_score or c[1] != top_compared]
+
+    unresolved_new_names = added_names - claimed_new_names
+    return renamed_columns, unresolved_new_names
+
+
 def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list) -> dict:
     """
     Read a re-uploaded, auditor-edited Excel file (from the cleaning workbook export) and
@@ -35,27 +164,25 @@ def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list)
     original row is missing, rather than misaligning the comparison or rejecting the file
     outright just because the row count changed.
 
-    COLUMN RENAME RULE: a single column rename is recognized whenever exactly one new
-    column name appears in the upload that wasn't in the snapshot, AND its data can be
-    confidently traced back to exactly one missing column's data (matched by comparing
-    cell values for rows present in both, not by position). This lets a rename coexist
-    in the same upload with any number of genuinely unrelated column deletions — e.g. the
-    auditor renames one column and deletes a different one in the same editing session —
-    without that being treated as ambiguous, since the value-matching tells us precisely
-    which missing name the new name replaces, leaving the rest as ordinary deletions.
+    COLUMN RENAME RULE: any number of simultaneous column renames are supported in one
+    upload. Each new column name's data is compared against every missing column's data,
+    and pairings are assigned greedily by strongest match first (see _resolve_renames) —
+    this lets an auditor rename several columns AND delete several others in a single
+    editing session without needing multiple upload rounds, as long as each rename's
+    underlying data is clearly distinguishable from every other candidate.
 
-    Only ONE rename is supported per upload. If more than one new column name appears at
-    once, we cannot safely tell which old name each one is meant to replace without
-    guessing, so this is reported as `ambiguous_changes` instead. Likewise, if a new
-    name's values don't strongly match any missing column's data (below a 90% match
-    threshold), it's treated as an unexplained new column rather than guessed as a rename.
+    A pairing is only trusted when it clears a 90% value-match threshold AND has actual
+    comparable data (not all blank). Any new column name that can't be confidently traced
+    to exactly one missing column this way is reported as an "unresolved" addition rather
+    than guessed — but, importantly, any OTHER rename in the same upload that WAS resolved
+    confidently still goes through normally. Only the genuinely unclear renames block;
+    everything else proceeds.
 
-    Renames are deliberately NOT inferred from column position. An earlier version of this
-    function paired old/new names by index, which broke as soon as the live schema drifted
-    from the snapshot for any other reason — e.g. resolving one column can introduce a new
-    derived column (such as a tax_amount field that only exists once a column is mapped),
-    which shifts every later column's index and caused completely unrelated, untouched
-    columns to be misreported as renamed.
+    Renames are deliberately NOT inferred from column position, for the same reason as
+    before: schema drift between the snapshot and the live mapping (e.g. a derived column
+    like tax_amount appearing only after a different column is resolved) can shift column
+    order in ways unrelated to anything the auditor actually did, and position-based
+    pairing previously misattributed renames to completely untouched columns because of it.
 
     Returns a dict with:
       "corrections": list of {row_index, column, original_value, corrected_value} for every
@@ -64,14 +191,18 @@ def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list)
         from the uploaded file — rows the auditor removed.
       "deleted_columns": list of column names present in the snapshot but missing from the
         uploaded file, where no rename was recognized — i.e. genuine deletions only.
-      "renamed_columns": dict of {old_name: new_name} for the single column rename
-        recognized this round, if any (empty dict if none, or if ambiguous_changes is True).
-        The caller should apply this directly to the column mapping (set mapped_to to the
-        new name) regardless of whether the column was previously unknown or already mapped.
-      "ambiguous_changes": True if more than one column's identity changed at once (more
-        than one name missing and/or more than one name added), meaning no rename could be
-        safely inferred. The caller should ask the auditor to re-download a fresh workbook
-        rather than guess.
+      "renamed_columns": dict of {old_name: new_name} for every confidently-resolved
+        rename this round. The caller should apply each of these directly to the column
+        mapping (set mapped_to to the new name) regardless of whether the column was
+        previously unknown or already mapped.
+      "unresolved_columns": list of new column names that appeared in the upload but
+        could not be confidently traced back to any missing column. These are NOT renames
+        and NOT plain deletions — they're genuinely new, unexplained columns (or renames
+        too ambiguous to trust). The caller should surface these specifically rather than
+        silently accepting or rejecting them.
+      "ambiguous_changes": True only when there is at least one unresolved_columns entry,
+        kept for backward compatibility with callers checking this single flag. Prefer
+        checking unresolved_columns directly for which specific column needs attention.
       "new_row_ids": list of row ids found in the uploaded file that were never in the
         snapshot — this should not normally happen since the hidden id column is locked
         from being repurposed, but is reported for safety.
@@ -154,96 +285,19 @@ def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list)
     missing_names = snapshot_columns - uploaded_columns
     added_names = uploaded_columns - snapshot_columns
 
-    # A rename and pure deletions can legitimately happen in the SAME upload (e.g. the
-    # auditor renames one column and deletes a different, unrelated one in the same
-    # editing session) — that should not be treated as ambiguous. The real ambiguity
-    # only arises when MORE THAN ONE new name appears, since then we can't tell which
-    # old name each new name is meant to replace without guessing.
-    #
-    # With at most one added name, we still need to figure out WHICH missing name (if
-    # several are missing) it actually replaces, versus the rest being genuine
-    # deletions. Name-set membership alone can't tell us that when len(missing) > 1, so
-    # we use the data itself: a rename keeps the same cell VALUES under a new header,
-    # while a genuine deletion's values simply disappear. We compare the new column's
-    # values (for shared row ids) against each missing column's values and treat the
-    # best, sufficiently-strong match as the rename target. If no missing column's
-    # values line up well enough, we don't guess — the new column is reported as an
-    # unexplained addition via ambiguous_changes instead.
-    renamed_columns = {}
-    ambiguous_changes = False
+    # Resolve ALL renames at once (zero, one, or several), using value-matching to pair
+    # each added name with the missing name its data actually belongs to. Any added name
+    # that can't be confidently paired ends up in unresolved_columns — and crucially,
+    # other renames in the same batch that WERE resolved confidently are unaffected by
+    # that one uncertain case.
+    renamed_columns, unresolved_columns = _resolve_renames(
+        missing_names, added_names, snapshot_rows_by_id, uploaded_rows_by_id
+    )
 
-    if len(added_names) > 1:
-        # Multiple new names at once — cannot safely tell which old name each one
-        # replaces without guessing. Reported as ambiguous rather than paired by
-        # position (which previously misattributed renames during schema drift).
-        ambiguous_changes = True
-    elif len(added_names) == 1:
-        new_name = next(iter(added_names))
+    # Genuine deletions: missing names that were not claimed as the source of any rename.
+    deleted_columns = sorted(missing_names - set(renamed_columns.keys()))
 
-        if len(missing_names) == 0:
-            # A genuinely new column with nothing missing to pair it with — not a
-            # rename of anything, just an unexplained addition. Treated as ambiguous
-            # so the caller can ask what this new column is, rather than silently
-            # accepting an unplanned schema change.
-            ambiguous_changes = True
-        elif len(missing_names) == 1:
-            # Simple case: exactly one missing, one added — same as before, no need
-            # to check values, there's only one possible pairing.
-            renamed_columns[next(iter(missing_names))] = new_name
-        else:
-            # Multiple missing names, one added name — use cell values (for rows
-            # present in both snapshot and upload) to find which missing column the
-            # new column's data actually matches. This is what lets a rename and one
-            # or more unrelated deletions coexist safely in the same upload.
-            shared_row_ids = set(snapshot_rows_by_id.keys()) & set(uploaded_rows_by_id.keys())
-            best_match = None
-            best_match_score = -1
-            for candidate_old_name in missing_names:
-                compared = 0
-                matched = 0
-                for row_id in shared_row_ids:
-                    old_value = snapshot_rows_by_id[row_id].get(candidate_old_name)
-                    new_value = uploaded_rows_by_id[row_id].get(new_name)
-                    old_is_blank = old_value is None or str(old_value).strip() == ""
-                    new_is_blank = new_value is None or str(new_value).strip() == ""
-                    if old_is_blank and new_is_blank:
-                        # Both sides blank for this row — this tells us nothing about
-                        # whether these two columns are the same column renamed (every
-                        # other all-empty column in the file would "match" too). Skip
-                        # rather than counting it as a match.
-                        continue
-                    compared += 1
-                    if not values_differ(old_value, new_value):
-                        matched += 1
-                # A candidate with compared == 0 (e.g. an entirely empty column, with
-                # nothing to compare in any shared row) provides NO positive evidence
-                # either way and must not be allowed to win — score=0 here means
-                # "no information", not "confirmed mismatch", and treating the two the
-                # same way previously let an empty candidate win by coin-flip against
-                # another equally-uninformative candidate (non-deterministic, and not
-                # actually justified by any evidence).
-                if compared == 0:
-                    continue
-                score = matched / compared
-                if score > best_match_score:
-                    best_match_score = score
-                    best_match = candidate_old_name
-
-            # Require a strong match (at least 90% of compared values identical) before
-            # trusting it as a rename — a weak match means this is more likely a
-            # genuinely new column that happens to share a few coincidental values,
-            # not a rename, and guessing wrong here is worse than asking. If no
-            # candidate had any comparable data at all (best_match stays None), we
-            # also don't guess — same reasoning.
-            if best_match is not None and best_match_score >= 0.9:
-                renamed_columns[best_match] = new_name
-            else:
-                ambiguous_changes = True
-
-    if ambiguous_changes:
-        deleted_columns = []
-    else:
-        deleted_columns = sorted(missing_names - set(renamed_columns.keys()))
+    ambiguous_changes = len(unresolved_columns) > 0
 
     # Rows present in the snapshot but missing from the upload entirely = deliberately deleted rows
     deleted_row_ids = sorted(set(snapshot_rows_by_id.keys()) - set(uploaded_rows_by_id.keys()))
@@ -255,6 +309,8 @@ def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list)
     # Diff cell values only for rows that exist in both. For columns, use the snapshot's
     # name for any column unchanged or recognized as a rename, so corrections key against
     # the name the mapping/dataframe still uses today (pre-rename), not the new label.
+    # Unresolved new columns are deliberately excluded here — we don't know what original
+    # column (if any) they correspond to, so there is nothing safe to diff them against.
     diffable_columns = {}  # snapshot_name -> uploaded_name
     for col_name in snapshot_columns & uploaded_columns:
         diffable_columns[col_name] = col_name
@@ -282,6 +338,7 @@ def diff_uploaded_against_snapshot(uploaded_file_path: str, snapshot_rows: list)
         "deleted_row_ids": deleted_row_ids,
         "deleted_columns": deleted_columns,
         "renamed_columns": renamed_columns,
+        "unresolved_columns": sorted(unresolved_columns),
         "ambiguous_changes": ambiguous_changes,
         "new_row_ids": new_row_ids,
     }

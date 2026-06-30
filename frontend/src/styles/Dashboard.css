@@ -1,0 +1,103 @@
+/* Dashboard Container */
+.dashboard {
+  width: 100%;
+}
+
+/* Header */
+.dashboard-header {
+  margin-bottom: 28px;
+}
+
+.dashboard-header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.dashboard-header p {
+  font-size: 14px;
+  color: var(--text-soft);
+}
+
+/* Cards Grid */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+/* Individual Card Base */
+.dashboard-card {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong); /* Default border */
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dashboard-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Card accent stripe */
+.dashboard-card.card-teal { border-left-color: var(--primary); }
+.dashboard-card.card-blue { border-left-color: var(--accent); }
+.dashboard-card.card-green { border-left-color: var(--success); }
+
+/* Icon styles */
+.dashboard-card-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.dashboard-card-icon.icon-teal { color: var(--primary); }
+.dashboard-card-icon.icon-blue { color: var(--accent); }
+.dashboard-card-icon.icon-green { color: var(--success); }
+
+/* Content details */
+.dashboard-card-value {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.dashboard-card-label {
+  font-size: 13px;
+  color: var(--text-soft);
+  font-weight: 500;
+}
+
+/* Responsive */
+
+/* Tablet */
+@media (max-width: 900px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-card {
+    padding: 18px;
+  }
+
+  .dashboard-header h1 {
+    font-size: 22px;
+  }
+}

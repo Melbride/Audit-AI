@@ -1,0 +1,341 @@
+/* Users.css */
+
+.users-page {
+  width: 100%;
+}
+
+/* Header */
+
+.users-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px; /* Reduced vertical gap */
+}
+
+.users-header-left h1 {
+  font-size: 16px; /* Scaled text size */
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Teal accent band */
+.users-header-left h1::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+.users-header-left p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.users-header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Buttons */
+
+.btn {
+  height: 32px; /* Standardized height */
+  padding: 0 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: background var(--transition), color var(--transition), opacity var(--transition);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--background); /* High contrast text */
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.btn-secondary:hover {
+  background: var(--border);
+  border-color: var(--border-strong);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  transition: color var(--transition);
+}
+
+.btn-edit {
+  color: var(--accent);
+  margin-right: 12px !important; /* Spacing between Edit and Delete links */
+}
+
+.btn-edit:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.btn-delete {
+  color: var(--danger-text);
+}
+
+.btn-delete:hover {
+  color: var(--danger);
+  text-decoration: underline;
+}
+
+/* Card */
+
+.users-card {
+  background: var(--background) !important; /* Flattens card panel */
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: none !important;            /* Removes shadows */
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+/* Messages */
+
+.page-message {
+  padding: 16px;
+  color: var(--text-soft);
+  font-size: 13px;
+  background: var(--background);
+}
+
+/* Table System */
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.users-table thead tr {
+  background: var(--surface-hover);
+}
+
+.users-table th {
+  background: var(--surface-hover);
+  text-align: left;
+  padding: 10px 14px; /* Compressed padding */
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text);
+  border-bottom: 2px solid var(--border-strong);
+}
+
+.users-table tbody tr {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+/* Prevents white row backgrounds */
+.users-table tbody tr:nth-child(odd),
+.users-table tbody tr:nth-child(even) {
+  background: var(--surface) !important; /* Nested */
+}
+
+.users-table tbody tr:hover {
+  background: var(--surface-hover) !important;
+}
+
+.users-table tbody tr:hover td {
+  color: var(--text) !important;
+}
+
+.users-table td {
+  padding: 8px 14px; /* Compact row sizes */
+  color: var(--text-soft);
+  vertical-align: middle;
+}
+
+.user-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.user-email,
+.user-client {
+  font-size: 13.5px;
+  color: var(--text-soft);
+}
+
+/* Status */
+
+.user-status {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.user-status.active {
+  color: var(--success);
+}
+
+.user-status.inactive {
+  color: var(--muted);
+}
+
+/* Role Badges */
+
+.role-badge {
+  display: inline-block;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: transparent !important; /* Removed backgrounds */
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+.role-admin { color: var(--danger-text) !important; }
+.role-accountant { color: var(--warning) !important; }
+.role-auditor { color: var(--success) !important; }
+.role-senior-auditor { color: var(--accent) !important; }
+.role-assistant-manager { color: #c084fc !important; }
+.role-audit-manager { color: #22d3ee !important; }
+.role-engagement-partner { color: #fbbf24 !important; }
+.role-quality-reviewer { color: #34d399 !important; }
+
+/* Modal Contexts */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.modal {
+  width: 400px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal h3 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Error Display */
+
+.error-box {
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  border-radius: 6px;
+  border: 1px solid var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+/* Form Input Fields */
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.form-input,
+.form-select {
+  width: 100%;
+  height: 34px;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--background);
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.form-select {
+  cursor: pointer;
+}
+
+.form-input:focus,
+.form-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.modal-actions .btn {
+  flex: 1;
+}
+
+/* Responsive Viewports */
+
+@media (max-width: 900px) {
+  .users-card {
+    overflow-x: auto;
+  }
+
+  .users-table {
+    min-width: 900px;
+  }
+}
+
+@media (max-width: 700px) {
+  .users-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .modal {
+    width: 95%;
+    padding: 24px;
+  }
+}

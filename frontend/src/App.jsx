@@ -1,77 +1,207 @@
-import { useState } from "react";
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import Users from "./pages/Users";
-import Clients from "./pages/Clients";
-import Layout from "./Layout";
-import Engagements from "./pages/Engagements";
-import EngagementDetail from "./pages/EngagementDetail";
-import Notifications from "./pages/Notifications";
-import Submissions from "./pages/Submissions";
+import { useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
+// AI pipeline pages 
+import UploadPage from './pages/UploadPage'
+import MappingPage from './pages/MappingPage'
+import CleanPage from './pages/CleanPage'
+import AnalysisPage from './pages/AnalysisPage'
+import CorrectedResultsPage from './pages/CorrectedResultsPage'
 
+// App/management pages 
+import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
+import Users from './pages/Users'
+import Clients from './pages/Clients'
+import Engagements from './pages/Engagements'
+import EngagementDetail from './pages/EngagementDetail'
+import Notifications from './pages/Notifications'
+import Submissions from './pages/Submissions'
+import AllFiles from './pages/AllFiles'
+import Layout from './pages/Layout'
+import './App.css'
 
+function RequireAuth({ user, children }) {
+  if (!user) return <Navigate to="/login" replace />
+  return children
+}
 
-export default function App() {
-  const [page, setPage] = useState("dashboard");
-  const [engagementId, setEngagementId] = useState(null);
-
-  const handleNavigate = (newPage, params) => {
-    setPage(newPage);
-    if (newPage === "engagement-detail") {
-      setEngagementId(params);
-    }
-  };
-
+function App() {
   const [user, setUser] = useState(() => {
     try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const parsed = JSON.parse(stored);
-      if (!parsed || !parsed.full_name) return null;
-      return parsed;
+      const stored = localStorage.getItem("user")
+      if (!stored) return null
+      const parsed = JSON.parse(stored)
+      if (!parsed || !parsed.full_name) return null
+      return parsed
     } catch {
-      return null;
+      return null
     }
-  });
+  })
 
   const handleLogin = (userData) => {
-    setUser(userData);
-    setPage("dashboard");
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setUser(null);
-    setPage("dashboard");
-  };
-
-  if (!user) {
-    return <Login onLogin={handleLogin} />;
+    setUser(userData)
   }
 
-  // Pick which page's content to render inside the shared Layout
-  let content;
- if (page === "users") {
-    content = <Users user={user} onNavigate={handleNavigate} />;
-  } else if (page === "clients") {
-    content = <Clients user={user} onNavigate={handleNavigate} />;
-  } else if (page === "engagements") {
-    content = <Engagements user={user} onNavigate={handleNavigate} />;
-  } else if (page === "engagement-detail") {
-    content = <EngagementDetail engagementId={engagementId} user={user} onNavigate={handleNavigate} />;
-  } else if (page === "submissions") {
-  content = <Submissions user={user} onNavigate={handleNavigate} />;
-  } else if (page === "notifications") {
-    content = <Notifications user={user} onNavigate={handleNavigate} />;
-  } else {
-    content = <Dashboard user={user} onNavigate={handleNavigate} />;
+  const handleLogout = () => {
+    localStorage.removeItem("token")
+    localStorage.removeItem("user")
+    setUser(null)
   }
 
   return (
-    <Layout user={user} currentPage={page} onNavigate={handleNavigate} onLogout={handleLogout}>
-      {content}
-    </Layout>
-  );
+    <BrowserRouter>
+      <Routes>
+        {/* Login (no sidebar) */}
+        <Route
+          path="/login"
+          element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLogin} />}
+        />
+
+        {/* All authenticated pages (wrapped in Layout — persistent sidebar) */}
+
+        {/* AI Pipeline pages */}
+        <Route
+          path="/upload"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <UploadPage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/mapping"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <MappingPage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/clean"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <CleanPage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/analysis"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <AnalysisPage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/corrected-results"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <CorrectedResultsPage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+
+        {/* Management pages */}
+        <Route
+          path="/dashboard"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Dashboard user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/clients"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Clients user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/engagements"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Engagements user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/engagements/:engagementId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <EngagementDetail user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/submissions"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Submissions user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Users user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Notifications user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/files"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <AllFiles user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+
+        {/* Default: / goes to login if not logged in, dashboard if logged in */}
+        <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+
+        {/* Anything unmatched */}
+        <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+      </Routes>
+    </BrowserRouter>
+  )
 }
+
+export default App

@@ -59,7 +59,7 @@ function CorrectedResultsPage() {
     // ambiguous date) and confirmed the system's guess is right. Calls the
     // existing acknowledge-issue endpoint, which records who confirmed it
     // and re-cleans with that issue filtered out. The cell value itself is
-    // left untouched — this is a deliberate, logged decision, not a silent
+    // left untouched, this is a deliberate, logged decision, not a silent
     // dismissal, and it's required before Proceed will unlock (can_proceed
     // counts every severity, info included).
     const handleConfirmCorrect = async (issue) => {
@@ -81,7 +81,7 @@ function CorrectedResultsPage() {
         }
     }
 
-    // "Edit this cell" — no backend call. Scrolls the matching row into view
+    // "Edit this cell", no backend call. Scrolls the matching row into view
     // in the table below and briefly highlights it, so the auditor lands
     // exactly where they need to type the correct value. Editing and saving
     // clears the issue naturally on the next clean cycle, since the
@@ -108,10 +108,10 @@ function CorrectedResultsPage() {
         <div className="cr-page-wrapper">
             <div className="cr-header-section">
                 <button className="cr-btn-back-only" onClick={() => navigate(-1)}>Back to Cleaning</button>
-                <div className="cr-title-group">
+                {/* <div className="cr-title-group">
                     <h1 className="cr-main-logo">Audit AI</h1>
                     <p className="cr-main-subtitle">AI Financial Intelligence System</p>
-                </div>
+                </div> */}
             </div>
 
             <div className="cr-main-card">
@@ -151,14 +151,14 @@ function CorrectedResultsPage() {
                                                 disabled={acknowledging === issue.issue_id}
                                                 onClick={() => handleConfirmCorrect(issue)}
                                             >
-                                                {acknowledging === issue.issue_id ? 'Confirming...' : '✓ Correct as-is'}
+                                                {acknowledging === issue.issue_id ? 'Confirming...' : 'Correct as-is'}
                                             </button>
                                             <button
                                                 className="cr-btn cr-btn-small cr-btn-secondary"
                                                 disabled={acknowledging === issue.issue_id}
                                                 onClick={() => handleEditThisCell(issue)}
                                             >
-                                                ✎ Edit this cell
+                                                Edit this cell
                                             </button>
                                         </div>
                                     )}
@@ -167,7 +167,7 @@ function CorrectedResultsPage() {
                         </div>
                     </div>
                 ) : (
-                    <div className="cr-clean-banner">✔ No issues remaining — data is clean and ready.</div>
+                    <div className="cr-clean-banner">No issues remaining,data is clean and ready.</div>
                 )}
             </div>
 
@@ -175,8 +175,8 @@ function CorrectedResultsPage() {
                 <h2 className="cr-section-title">Correct Remaining Issues</h2>
                 <p className="cr-hint-text">Showing {flaggedRowsData.length} flagged rows. Click any cell to edit directly.</p>
 
-                {editCount > 0 && <div className="cr-edit-indicator">✏ {editCount} unsaved edits — click Save to apply</div>}
-                {error && <div className="cr-error-banner">⚠ {error}</div>}
+                {editCount > 0 && <div className="cr-edit-indicator">{editCount} unsaved edits, click Save to apply</div>}
+                {error && <div className="cr-error-banner">{error}</div>}
 
                 <div className="cr-table-overflow">
                     <table className="cr-data-table">
@@ -216,9 +216,9 @@ function CorrectedResultsPage() {
                           issue has been explicitly confirmed or edited, not just skipped.
                         */}
                         {!currentResult.can_proceed ? (
-                            <span className="cr-warn-text">⚠ Resolve remaining issues ({report.issues.length} remaining)</span>
+                            <span className="cr-warn-text">Resolve remaining issues ({report.issues.length} remaining)</span>
                         ) : (
-                            <span className="cr-success-text">✔ Data is ready for analysis.</span>
+                            <span className="cr-success-text">Data is ready for analysis.</span>
                         )}
                     </div>
                     <button className={`cr-action-btn ${currentResult.can_proceed ? 'cr-btn-go' : 'cr-btn-locked'}`} disabled={!currentResult.can_proceed} onClick={() => navigate('/analysis', { state: { cleanResult: currentResult, clientId, uploadResult } })}>

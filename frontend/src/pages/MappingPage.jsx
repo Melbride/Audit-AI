@@ -147,7 +147,7 @@ function MappingPage() {
 
     const handleSave = async () => {
         if (hasUnresolvedRows()) {
-            setError('Please review all "Needs Review" columns before saving — either map them or confirm they should stay unknown.')
+            setError('Please review all "Needs Review" columns before saving, either map them or confirm they should stay unknown.')
             return
         }
         if (fileTypeIsIncomplete()) {
@@ -204,13 +204,12 @@ function MappingPage() {
         return { pct, cls }
     }
 
-    // Human-readable explanation of why this screen has data already, shown only
     // when detection didn't actually call the AI. Both cache paths ("saved_mapping"
     // and "fingerprint_cache") get the same friendly framing; the underlying
     // backend message is still shown alongside for anyone who wants the detail.
     const cacheBannerText = () => {
         if (detectionSource === 'saved_mapping' || detectionSource === 'fingerprint_cache') {
-            return "This mapping was loaded from this client's saved profile — no AI detection was needed. Review it below and confirm, or make changes if anything looks off for this file."
+            return "This mapping was loaded from this client's saved profile.Review, change and confirm as needed."
         }
         return null
     }
@@ -226,10 +225,10 @@ function MappingPage() {
 
     return (
         <div className="page">
-            <div className="header">
+            {/* <div className="header">
                 <h1 className="logo">Audit AI</h1>
                 <p className="subtitle">AI Financial Intelligence System</p>
-            </div>
+            </div> */}
 
             <div className="card">
                 <h2 className="title">Column Detection</h2>
@@ -249,7 +248,7 @@ function MappingPage() {
                 </div>
             )}
 
-            {error && <div className="error">⚠ {error}</div>}
+            {error && <div className="error">{error}</div>}
 
             {mapping && !detecting && (
                 <div className="card-mapping-body">
@@ -257,12 +256,12 @@ function MappingPage() {
 
                     {cacheBannerText() && (
                         <div className="cache-banner">
-                            ✓ {cacheBannerText()}
+                            {cacheBannerText()}
                         </div>
                     )}
 
                     <p className="mapping-note">
-                        Review the mappings below. Click any value under "Mapped To" to correct it. Unknown columns must be fixed or skipped before saving.
+                        Unknown columns must be fixed or skipped before saving.
                     </p>
 
                     <div className="file-type-row">
@@ -274,7 +273,7 @@ function MappingPage() {
                                     className="file-type-custom-input"
                                     type="text"
                                     autoFocus
-                                    placeholder="Type the file type, e.g. Petty Cash Log"
+                                    placeholder="Type the file type here"
                                     value={customFileTypeLabel}
                                     onChange={(e) => setCustomFileTypeLabel(e.target.value)}
                                 />
@@ -286,7 +285,7 @@ function MappingPage() {
                                         setFileType(Object.keys(FILE_TYPE_CATEGORIES)[0])
                                     }}
                                 >
-                                    ↩ choose from list instead
+                                    choose from list instead
                                 </button>
                             </>
                         ) : (
@@ -303,8 +302,8 @@ function MappingPage() {
 
                         <span className="file-type-hint">
                             {detectionSource === 'saved_mapping' || detectionSource === 'fingerprint_cache'
-                                ? 'Loaded from saved profile — confirm or change'
-                                : 'AI suggested — confirm or change before saving'}
+                                ? 'Loaded from saved profile, confirm or change'
+                                : 'AI suggested, confirm or change before saving'}
                         </span>
                     </div>
 
@@ -312,11 +311,11 @@ function MappingPage() {
                         const count = Object.entries(mapping).filter(([col, info]) => isRowUnresolved(col, info)).length
                         return count > 0 ? (
                             <div className="review-counter">
-                                ⚠ {count} column{count > 1 ? 's' : ''} still need{count === 1 ? 's' : ''} your review
+                                {count} column{count > 1 ? 's' : ''} still need{count === 1 ? 's' : ''} your review
                             </div>
                         ) : (
                             <div className="review-counter review-counter-done">
-                                ✔ All columns reviewed, ready to save
+                                All columns reviewed, ready to save
                             </div>
                         )
                     })()}
@@ -338,6 +337,8 @@ function MappingPage() {
                                 {Object.entries(mapping).map(([col, info]) => {
                                     const unresolved = isRowUnresolved(col, info)
                                     const { pct, cls } = fillRateDisplay(info.fill_rate)
+
+                                    
                                     return (
                                         <tr key={col} className={unresolved ? 'row-needs-review' : ''}>
                                             <td>
@@ -409,7 +410,7 @@ function MappingPage() {
                                                 ) : info.field_type === 'unknown' ? (
                                                     <span className="badge badge-unknown">Set field type</span>
                                                 ) : (
-                                                    <span className="badge badge-ok">✔ Detected</span>
+                                                    <span className="badge badge-ok">Detected</span>
                                                 )}
                                             </td>
                                         </tr>
@@ -419,7 +420,7 @@ function MappingPage() {
                         </table>
                     </div>
 
-                    {error && <div className="error">⚠ {error}</div>}
+                    {error && <div className="error">{error}</div>}
 
                     {!saved ? (
                         <button className="btn" onClick={handleSave} disabled={saving || hasUnresolvedRows() || fileTypeIsIncomplete()}>
@@ -427,7 +428,7 @@ function MappingPage() {
                         </button>
                     ) : (
                         <div>
-                            <div className="success">Mapping saved successfully! You can now proceed to the next step.</div>
+                            <div className="success">Mapping saved successfully! You can now proceed.</div>
                             <button className="btn btn-secondary" onClick={handleProceed}>Proceed to Clean →</button>
                         </div>
                     )}

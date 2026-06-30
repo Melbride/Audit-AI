@@ -1,0 +1,306 @@
+/* Page wrapper */
+.af-page {
+  /* Top padding zeroed out */
+  padding: 0 12px 12px; 
+  margin: 0;
+}
+
+/* Breadcrumb */
+.af-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  /* Tightened spacing */
+  margin-bottom: 8px; 
+}
+
+.af-breadcrumb-link {
+  color: var(--accent); 
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.af-breadcrumb-link:hover {
+  text-decoration: underline;
+  color: var(--accent-hover);
+}
+
+.af-breadcrumb-sep {
+  color: var(--muted);
+}
+
+.af-breadcrumb-current {
+  color: var(--text-soft);
+  font-weight: 400;
+}
+
+/* Page header */
+.af-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px; /* Reduced space below header */
+}
+
+.af-title {
+  font-size: 16px; /* Scaled text size */
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Teal accent band */
+.af-title::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+.af-subtitle {
+  font-size: 13px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+/* Filter row */
+.af-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.af-filter-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Error banner  */
+.af-error {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--danger-text);
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* Empty / loading states */
+.af-empty {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-soft);
+  font-size: 13px;
+  box-shadow: none !important;
+}
+
+/* Table container */
+.af-table-wrap {
+  background: var(--background) !important; /* Flattens card panel */
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: none !important;  /* Removes shadows */
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+/* Table layout */
+.af-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+/* Column widths */
+.af-table th:nth-child(1) { width: 35%; }   
+.af-table th:nth-child(2) { width: 8%;  }   
+.af-table th:nth-child(3) { width: 22%; }   
+.af-table th:nth-child(4) { width: 20%; }   
+.af-table th:nth-child(5) { width: 15%; }   
+
+/* Table header */
+.af-table thead tr {
+  background: var(--surface-hover);
+}
+
+.af-table th {
+  background: var(--surface-hover);
+  padding: 10px 14px; /* Compact padding */
+  text-align: left;
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 2px solid var(--border-strong);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* Prevents white row backgrounds */
+.af-table tbody tr,
+.af-table tbody tr:nth-child(odd),
+.af-table tbody tr:nth-child(even) {
+  background: var(--surface) !important; /* Nested */
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.af-table tbody tr:hover {
+  background: var(--surface-hover) !important;
+}
+
+.af-table td {
+  padding: 8px 14px; /* Compact row sizes */
+  color: var(--text-soft) !important;
+  max-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.af-table tbody tr:hover td,
+.af-table tbody tr:hover td span,
+.af-table tbody tr:hover td a {
+  color: var(--text) !important;
+}
+
+/* File name column styling */
+.af-td-filename {
+  font-weight: 600;
+  color: var(--text) !important;
+}
+
+/* File type badge, small uppercase pill text */
+.af-td-type {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--accent) !important;
+}
+
+.af-table td.af-td-muted {
+  color: var(--text-soft) !important;
+}
+
+/* Status badges */
+.af-badge {
+  display: inline-block;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.af-badge--clean {
+  color: var(--success) !important;
+}
+
+.af-badge--flagged {
+  color: var(--warning) !important;
+}
+
+.af-badge--default,
+.af-badge.uploaded {
+  color: var(--accent) !important;
+}
+
+/* Custom dropdown panel layout */
+.af-dropdown {
+  position: relative;
+  min-width: 220px;
+}
+
+.af-dropdown-toggle {
+  width: 100%;
+  height: 34px; /* Standardized matching horizontal input heights block variables */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  box-sizing: border-box;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.af-dropdown-toggle:hover {
+  border-color: var(--primary);
+  background: var(--surface);
+}
+
+.af-dropdown-arrow {
+  font-size: 10px;
+  color: var(--accent);
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.af-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  width: 100%;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  z-index: 200;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* Dark scrollbars for dropdown menus */
+.af-dropdown-menu::-webkit-scrollbar { width: 4px; }
+.af-dropdown-menu::-webkit-scrollbar-track { background: transparent; }
+.af-dropdown-menu::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+
+.af-dropdown-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-soft);
+  cursor: pointer;
+  background: transparent;
+  transition: background var(--transition), color var(--transition);
+}
+
+.af-dropdown-item:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.af-dropdown-item--active {
+  background: var(--primary) !important;
+  color: var(--background) !important; /* Text on teal background */
+  font-weight: 600;
+}
+
+.af-dropdown-item--active:hover {
+  background: var(--primary-hover) !important;
+  color: var(--background) !important;
+}

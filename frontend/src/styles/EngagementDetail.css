@@ -1,0 +1,347 @@
+/* Page */
+
+.engagement-detail {
+  width: 100%;
+}
+
+.loading-message,
+.empty-message,
+.error-message {
+  padding: 24px;
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+/* Back Button */
+
+.back-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 16px;
+  color: var(--accent); /* Sky Blue for actions */
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.back-button:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* Header */
+
+.engagement-header {
+  margin-bottom: 24px;
+}
+
+.engagement-header h1 {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.engagement-header p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+/* Send Report Button */
+
+.send-report {
+  margin-bottom: 16px;
+}
+
+.send-report-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary); /* Primary teal */
+  color: var(--background);  /* Dark contrast text */
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s ease;
+}
+
+.send-report-btn:hover {
+  background: var(--primary-hover);
+}
+
+.send-report-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+/* Table Container */
+
+.sections-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* Table */
+
+.sections-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sections-table thead tr {
+  background: var(--surface-hover);
+}
+
+.sections-table th {
+  background: var(--surface-hover);
+  text-align: left;
+  padding: 14px 20px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--border-strong);
+}
+
+.sections-table tbody tr {
+  background: var(--surface) !important;
+  transition: background var(--transition);
+}
+
+/* Force standard system row backgrounds to prevent light bleed variables */
+.sections-table tbody tr:nth-child(odd),
+.sections-table tbody tr:nth-child(even) {
+  background: var(--surface) !important;
+}
+
+.sections-table tbody tr:hover {
+  background: var(--surface-hover) !important;
+}
+
+.sections-table td {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--text-soft);
+}
+
+.section-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text) !important;
+}
+
+.updated-by {
+  font-size: 14px;
+  color: var(--text-soft);
+}
+
+/* Status Badges */
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-badge.draft {
+  color: var(--text-soft);
+  background: var(--border);
+}
+
+.status-badge.under-review {
+  color: var(--accent);
+  background: var(--info-bg);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.status-badge.changes-requested {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.status-badge.approved {
+  color: var(--success);
+  background: var(--success-bg);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.status-badge.cancelled {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Notes */
+
+.status-note {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Waiting / Approved Text */
+
+.workflow-text {
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.workflow-approved {
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workflow-cancelled {
+  color: var(--danger-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Workflow Actions */
+
+.workflow-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 240px;
+}
+
+.workflow-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Action Buttons */
+
+.action-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s ease;
+}
+
+.action-btn:disabled {
+  opacity: .3;
+  cursor: not-allowed;
+}
+
+.action-btn.primary {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.action-btn.primary:hover {
+  background: var(--primary);
+  color: var(--background);
+}
+
+.action-btn.secondary {
+  color: var(--text-soft);
+  border-color: var(--border-strong);
+}
+
+.action-btn.secondary:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.action-btn.success {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.action-btn.success:hover {
+  background: var(--success);
+  color: var(--background);
+}
+
+.action-btn.warning {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.action-btn.warning:hover {
+  background: var(--warning);
+  color: var(--background);
+}
+
+.action-btn.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.action-btn.danger:hover {
+  background: var(--danger);
+  color: var(--white);
+}
+
+/* Note Input */
+
+.note-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+  transition: border-color .2s ease, box-shadow .2s ease;
+  box-sizing: border-box;
+}
+
+.note-input::placeholder {
+  color: var(--muted);
+}
+
+.note-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+}
+
+/* Responsive */
+
+@media (max-width: 900px) {
+  .sections-card {
+    overflow-x: auto;
+  }
+
+  .sections-table {
+    min-width: 850px;
+  }
+}
+
+@media (max-width: 600px) {
+  .engagement-header h1 {
+    font-size: 22px;
+  }
+
+  .workflow-actions {
+    min-width: 180px;
+  }
+
+  .workflow-buttons {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .action-btn {
+    width: 100%;
+  }
+}
