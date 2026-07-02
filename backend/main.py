@@ -43,6 +43,7 @@ from cleaner import clean_dataframe
 from excel_export import build_cleaning_workbook
 from excel_diff import diff_uploaded_against_snapshot
 
+from analyzer import calculate_breakdowns, calculate_monthly_trend, detect_anomalies, generate_ai_insights
 
 # Load environment variables from the .env file
 load_dotenv()
@@ -174,6 +175,53 @@ def calculate_fill_rates(df: pd.DataFrame) -> dict:
         filled = df[col].replace("", float("nan")).dropna().count()
         fill_rates[col] = round(filled / total, 2) if total > 0 else 0.0
     return fill_rates
+
+# Check that each column's declared field_type actually matches its real data. Prevents usersfrom mistakenly marking a text column as numeric/date
+# Check that each column's declared field_type actually matches its real data. Prevents users from mistakenly marking a text column as numeric/date
+def validate_field_types_against_data(df: pd.DataFrame, mapping: dict) -> list:
+    problems = []
+    for original_col, info in mapping.items():
+        if not isinstance(info, dict):
+            continue
+        field_type = info.get("field_type")
+        mapped_to = info.get("mapped_to")
+        # Skip columns not present in this file, or left as unknown
+        if original_col not in df.columns or field_type in (None, "unknown") or mapped_to in (None, "unknown"):
+            continue
+        # Only look at non-empty values, an empty column shouldn't fail validation
+        values = df[original_col].dropna().replace("", None).dropna()
+        if len(values) == 0:
+            continue
+        if field_type == "numeric":
+            convertible = pd.to_numeric(values, errors="coerce")
+            failure_rate = convertible.isna().mean()
+            # Allow a small tolerance for stray bad cells, but flag if most values aren't numeric
+            if failure_rate > 0.3:
+                problems.append(
+                    f"'{original_col}' is marked as Number but most of its values "
+                    f"aren't numbers (e.g. '{values.iloc[0]}'). Please check the field type."
+                )
+        elif field_type == "date":
+            # Try parsing each value with flexible format detection, matching the
+            # same logic clean_dates() uses, since dates in real files come in
+            # multiple formats (DD/MM/YYYY, YYYY-MM-DD, etc.) even within one column
+            failures = 0
+            for val in values:
+                val_str = str(val).strip()
+                try:
+                    dayfirst = not (len(val_str) >= 10 and val_str[4] == '-' and val_str[7] == '-')
+                    parsed_val = pd.to_datetime(val_str, dayfirst=dayfirst, errors='coerce')
+                    if pd.isna(parsed_val):
+                        failures += 1
+                except Exception:
+                    failures += 1
+            failure_rate = failures / len(values)
+            if failure_rate > 0.3:
+                problems.append(
+                    f"'{original_col}' is marked as Date but most of its values "
+                    f"don't look like dates (e.g. '{values.iloc[0]}'). Please check the field type."
+                )
+    return problems
 
 # Compute a stable fingerprint for a set of column names, used to detect when a client uploads a file with the same schema as before
 def compute_schema_fingerprint(columns: list) -> str:
@@ -676,6 +724,7 @@ async def save_mapping_endpoint(
     client_id: str = Form(...),
     file_type: str = Form(...),
     mapping: str = Form(...),
+    file_id: str = Form(None),
     confirmed_by: str = Form(None)
 ):
     try:
@@ -684,6 +733,28 @@ async def save_mapping_endpoint(
         raise HTTPException(status_code=400, detail="Invalid mapping format.")
     if not mapping_dict:
         raise HTTPException(status_code=400, detail="Mapping cannot be empty. Please provide a valid mapping.")
+
+    # If we have access to the original file, validate that each column's
+    # declared field_type is consistent with its actual data before saving
+    if file_id:
+        save_path, file_ext = locate_uploaded_file(file_id)
+        if save_path:
+            try:
+                df = read_file_to_df(save_path, file_ext)
+                if df is not None:
+                    problems = validate_field_types_against_data(df, mapping_dict)
+                    if problems:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Field type mismatch detected: " + " | ".join(problems)
+                        )
+            except HTTPException:
+                raise
+            except Exception:
+                # If validation itself fails for an unexpected reason, don't block
+                # saving entirely — this check is a safety net, not the source of truth
+                pass
+
     save_mapping(client_id, file_type, mapping_dict, confirmed_by)
     return {"client_id": client_id, "file_type": file_type, "columns_saved": len(mapping_dict),
             "message": f"Mapping saved successfully for client {client_id} and file type {file_type}."}
@@ -975,6 +1046,161 @@ async def submit_inline_corrections_endpoint(
         "validation_report": report,
         "can_proceed": report.get("can_proceed", False),
         "message": f"{len(corrections_list)} correction(s) saved and re-cleaned."
+    }
+
+# Standardize a near-duplicate value across an entire column in one action.
+# Finds every row where the column matches from_value and replaces it with
+# to_value, saving one correction record per affected row, then re-cleans.
+@app.post("/clean/standardize-value")
+async def standardize_value_endpoint(
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general"),
+    column: str = Form(...),
+    from_value: str = Form(...),
+    to_value: str = Form(...),
+    corrected_by: str = Form(None),
+):
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        raise HTTPException(status_code=400, detail="No saved mapping found for this client.")
+
+    save_path, file_ext = locate_uploaded_file(file_id)
+    if not save_path:
+        raise HTTPException(status_code=404, detail="File not found. Please upload the file first.")
+
+    try:
+        df = read_file_to_df(save_path, file_ext)
+        if df is None:
+            raise HTTPException(status_code=400, detail="Could not read file.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
+
+    # Apply any previously saved corrections first, so we're matching against
+    # the current state of the data, not the raw original file
+    existing_corrections = get_cleaning_corrections(file_id, client_id, file_type)
+    df = apply_saved_corrections(df, mapping, existing_corrections)
+
+    # Translate the standard column name back to the original column name in df
+    standard_to_original = {
+        info.get("mapped_to"): original_col
+        for original_col, info in mapping.items()
+        if isinstance(info, dict) and info.get("mapped_to") not in ("", "unknown", None)
+    }
+    source_col = standard_to_original.get(column, column)
+
+    if source_col not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{column}' not found in file.")
+
+    # Find every row where this column currently matches from_value
+    matching_rows = df.index[df[source_col].astype(str).str.strip() == from_value].tolist()
+
+    if not matching_rows:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No rows found with value '{from_value}' in column '{column}'. It may have already been corrected."
+        )
+
+    # Create one correction record per affected row
+    standardize_records = [
+        {
+            "row_index": int(row_idx),
+            "column": column,
+            "original_value": from_value,
+            "corrected_value": to_value,
+        }
+        for row_idx in matching_rows
+    ]
+    save_cleaning_corrections(file_id, client_id, file_type, standardize_records, corrected_by)
+
+    # Re-clean with the standardization applied
+    cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+    save_cleaning_snapshot(file_id, client_id, file_type, cleaned_df)
+
+    return {
+        "file_id": file_id,
+        "client_id": client_id,
+        "file_type": file_type,
+        "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
+        "validation_report": report,
+        "can_proceed": report.get("can_proceed", False),
+        "rows_updated": len(matching_rows),
+        "message": f"Standardized {len(matching_rows)} row(s) in '{column}' from '{from_value}' to '{to_value}'."
+    }
+
+# Run the Financial Engine on a client's cleaned data using pandas calculations
+@app.post("/analyze/{client_id}")
+async def analyze_financials(
+    client_id: str,
+    file_id: str = Form(...),
+    file_type: str = Form("general")
+):
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="No saved mapping found for this client. Please complete column mapping first."
+        )
+    # Run the cleaning cycle to ensure the data is up-to-date and valid before analysis
+    cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+    if not report.get("can_proceed", False):
+        raise HTTPException(
+            status_code=400,
+            detail="This file still has unresolved issues. Please finish cleaning before running analysis."
+        )
+    # Perform financial analysis calculations
+    breakdowns = calculate_breakdowns(cleaned_df, mapping)
+    monthly_trend = calculate_monthly_trend(cleaned_df, mapping)
+    anomalies = detect_anomalies(monthly_trend)
+    # Return the analysis results along with a success message
+    return {
+        "client_id": client_id,
+        "file_id": file_id,
+        "file_type": file_type,
+        "breakdowns": breakdowns,
+        "monthly_trend": monthly_trend,
+        "anomalies": anomalies,
+        "message": "Financial analysis completed successfully."
+    }
+
+# Run the AI Insights Engine on already-calculated financial data.
+@app.post("/analyze/{client_id}/insights")
+async def analyze_insights(
+    client_id: str,
+    file_id: str = Form(...),
+    file_type: str = Form("general")
+):
+    # Ensure that a mapping exists for this client and file type before proceeding
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="No saved mapping found for this client. Please complete column mapping first."
+        )
+    # Run the cleaning cycle to ensure the data is up-to-date and valid before generating insights
+    cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+    # Check if the cleaned data is valid and ready for analysis
+    if not report.get("can_proceed", False):
+        raise HTTPException(
+            status_code=400,
+            detail="This file still has unresolved issues. Please finish cleaning before generating insights."
+        )
+    # Perform financial analysis calculations
+    breakdowns = calculate_breakdowns(cleaned_df, mapping)
+    monthly_trend = calculate_monthly_trend(cleaned_df, mapping)
+    anomalies = detect_anomalies(monthly_trend)
+    # Generate AI insights based on the calculated financial data
+    try:
+        insights = generate_ai_insights(breakdowns, monthly_trend, anomalies)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Insight generation failed: {str(e)}")
+    # Return the AI insights along with a success message
+    return {
+        "client_id": client_id,
+        "file_id": file_id,
+        "file_type": file_type,
+        "ai_insights": insights,
+        "message": "AI insights generated successfully."
     }
 
 # List all clients

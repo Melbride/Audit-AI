@@ -154,6 +154,7 @@ function MappingPage() {
         try {
             const formData = new FormData()
             formData.append('client_id', clientId)
+            formData.append('file_id', uploadResult.file_id)   
             formData.append('file_type', effectiveFileType())
             formData.append('mapping', JSON.stringify(persistedMapping))
             formData.append('confirmed_by', 'Auditor')

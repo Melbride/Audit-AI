@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import '../styles/CorrectedResultsPage.css'
+import { standardizeValue } from '../services/api'
 
 // Function to display the corrected results page after the auditor has made corrections to the cleaned data. It shows the updated validation report, allows the auditor to edit flagged rows, and provides options to save corrections or proceed to analysis.
 function CorrectedResultsPage() {
@@ -12,13 +13,10 @@ function CorrectedResultsPage() {
     const [pendingEdits, setPendingEdits] = useState({})
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
-    // Tracks which issue_id is currently being acknowledged, for a small
-    // per-issue loading state without blocking the whole page.
     const [acknowledging, setAcknowledging] = useState(null)
-    // Tracks which row to scroll/highlight when "Edit this cell" is clicked
     const [highlightedRowIndex, setHighlightedRowIndex] = useState(null)
+    const [standardizing, setStandardizing] = useState(null)
 
-    // If no data is available, redirect to CleanPage
     if (!cleanResult || !uploadResult) {
         return (
             <div className="cr-page-wrapper">
@@ -29,19 +27,19 @@ function CorrectedResultsPage() {
             </div>
         )
     }
-// Extract relevant data from the current result for display and editing
+
     const report = currentResult.validation_report
     const allRows = currentResult.cleaned_data || []
     const columns = allRows.length > 0 ? Object.keys(allRows[0]) : []
     const flaggedRowIndices = new Set(report.issues.filter(i => i.row_index !== 'N/A' && i.row_index !== null).map(i => parseInt(i.row_index)))
     const flaggedRowsData = allRows.map((row, rowIndex) => ({ row, rowIndex })).filter(({ rowIndex }) => flaggedRowIndices.has(rowIndex))
     const editCount = Object.keys(pendingEdits).length
-    // Handle cell edits by storing them in the pendingEdits state 
+
     const handleCellEdit = (rowIndex, col, originalValue, newValue) => {
         const key = `${rowIndex}__${col}`
         setPendingEdits(prev => ({ ...prev, [key]: { row_index: rowIndex, column: col, original_value: originalValue, corrected_value: newValue } }))
     }
-    // Save all pending corrections to the backend and update the current result
+
     const handleSaveCorrections = async () => {
         const corrections = Object.values(pendingEdits)
         if (corrections.length === 0) { setError('No changes made yet.'); return; }
@@ -51,12 +49,11 @@ function CorrectedResultsPage() {
             formData.append('file_id', uploadResult.file_id); formData.append('client_id', String(clientId));
             formData.append('file_type', fileType || 'general'); formData.append('corrections', JSON.stringify(corrections));
             formData.append('corrected_by', 'Auditor');
-            const response = await axios.post('http://localhost:8000/clean/submit-inline-corrections', formData )
+            const response = await axios.post('http://localhost:8000/clean/submit-inline-corrections', formData)
             setCurrentResult(response.data); setPendingEdits({});
         } catch (err) { setError(err.response?.data?.detail || 'Could not save corrections.'); } finally { setSaving(false); }
     }
 
-    // Handle confirming that an issue is correct as-is, sending an acknowledgment to the backend and updating the current result
     const handleConfirmCorrect = async (issue) => {
         setAcknowledging(issue.issue_id)
         setError(null)
@@ -76,7 +73,35 @@ function CorrectedResultsPage() {
         }
     }
 
-    // Handle Edit This Cell action by scrolling to the corresponding row in the table and highlighting it for 3 seconds
+    // Detects the "near-duplicate value" issue type, which stores both
+    // candidate values in original_value separated by " / "
+    const isDuplicateValueIssue = (issue) =>
+        issue.original_value && issue.original_value.includes(' / ') && issue.row === 'N/A'
+
+    // Standardizes every row matching replaceValue to keepValue for the
+    // given issue's column, then refreshes the page with the re-cleaned result
+    const handleStandardize = async (issue, keepValue, replaceValue) => {
+        setStandardizing(issue.issue_id)
+        setError(null)
+        try {
+            const formData = new FormData()
+            formData.append('file_id', uploadResult.file_id)
+            formData.append('client_id', String(clientId))
+            formData.append('file_type', fileType || 'general')
+            formData.append('column', issue.column)
+            formData.append('from_value', replaceValue)
+            formData.append('to_value', keepValue)
+            formData.append('corrected_by', 'Auditor')
+
+            const response = await standardizeValue(formData)
+            setCurrentResult(response.data)
+        } catch (err) {
+            setError(err.response?.data?.detail || 'Could not standardize values.')
+        } finally {
+            setStandardizing(null)
+        }
+    }
+
     const handleEditThisCell = (issue) => {
         const rowIndex = parseInt(issue.row_index)
         if (isNaN(rowIndex)) return
@@ -86,13 +111,12 @@ function CorrectedResultsPage() {
         setTimeout(() => setHighlightedRowIndex(null), 3000)
     }
 
-    // Sanity check for severity values and return appropriate CSS class for styling
     const severityClass = (severity) => {
-        switch (severity?.toLowerCase()) { 
-            case 'high': return 'cr-issue-high'; 
-            case 'medium': return 'cr-issue-medium'; 
-            case 'info': return 'cr-issue-info'; 
-            default: return 'cr-issue-medium'; 
+        switch (severity?.toLowerCase()) {
+            case 'high': return 'cr-issue-high';
+            case 'medium': return 'cr-issue-medium';
+            case 'info': return 'cr-issue-info';
+            default: return 'cr-issue-medium';
         }
     }
 
@@ -100,10 +124,6 @@ function CorrectedResultsPage() {
         <div className="cr-page-wrapper">
             <div className="cr-header-section">
                 <button className="cr-btn-back-only" onClick={() => navigate(-1)}>Back to Cleaning</button>
-                {/* <div className="cr-title-group">
-                    <h1 className="cr-main-logo">Audit AI</h1>
-                    <p className="cr-main-subtitle">AI Financial Intelligence System</p>
-                </div> */}
             </div>
 
             <div className="cr-main-card">
@@ -128,8 +148,6 @@ function CorrectedResultsPage() {
                                     </div>
                                     <p className="cr-issue-desc">{issue.issue}</p>
 
-                                    {/*
-                                      Info-severity issues (currently: ambiguous-date warnings) have a special action to take*/}
                                     {issue.severity === 'info' && issue.row_index !== 'N/A' && (
                                         <div className="cr-issue-actions">
                                             <button
@@ -148,6 +166,29 @@ function CorrectedResultsPage() {
                                             </button>
                                         </div>
                                     )}
+
+                                    {isDuplicateValueIssue(issue) && (() => {
+                                        const [valA, valB] = issue.original_value.split(' / ')
+                                        const busy = standardizing === issue.issue_id
+                                        return (
+                                            <div className="cr-issue-actions">
+                                                <button
+                                                    className="cr-btn cr-btn-small"
+                                                    disabled={busy}
+                                                    onClick={() => handleStandardize(issue, valA, valB)}
+                                                >
+                                                    {busy ? 'Applying...' : `Standardize to "${valA}"`}
+                                                </button>
+                                                <button
+                                                    className="cr-btn cr-btn-small cr-btn-secondary"
+                                                    disabled={busy}
+                                                    onClick={() => handleStandardize(issue, valB, valA)}
+                                                >
+                                                    {busy ? 'Applying...' : `Standardize to "${valB}"`}
+                                                </button>
+                                            </div>
+                                        )
+                                    })()}
                                 </div>
                             ))}
                         </div>
@@ -196,11 +237,6 @@ function CorrectedResultsPage() {
                         <button className="cr-action-btn cr-btn-save-data" onClick={handleSaveCorrections} disabled={saving || editCount === 0}>
                             {saving ? 'Saving...' : `Save Corrections (${editCount})`}
                         </button>
-                        {/*
-                          can_proceed counts ALL severities (high, medium, info) — so this
-                          warning stays visible, and Proceed stays locked, until every info-level
-                          issue has been explicitly confirmed or edited, not just skipped.
-                        */}
                         {!currentResult.can_proceed ? (
                             <span className="cr-warn-text">Resolve remaining issues ({report.issues.length} remaining)</span>
                         ) : (

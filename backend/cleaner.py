@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 from datetime import datetime
+from difflib import SequenceMatcher
 
 # Boolean/status value groups that should be consistent.Flag if mixed
 BOOLEAN_VALUE_GROUPS = [
@@ -122,6 +123,8 @@ def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None) ->
     df = handle_nulls(df, mapping, issues, fill_rates)
     # Check text columns for inconsistent boolean/status values
     check_value_consistency(df, mapping, issues)
+    # Check for near-duplicate values (same value with minor variations)
+    check_near_duplicate_values(df, mapping, issues)
     # Handle duplicates
     df = handle_duplicates(df, mapping, issues)
     # Build the validation report
@@ -355,6 +358,69 @@ def check_value_consistency(df: pd.DataFrame, mapping: dict, issues: list) -> No
                 ),
                 "severity": "medium"
             })
+
+# Function to detect near-duplicate values within a single text column
+def check_near_duplicate_values(df: pd.DataFrame, mapping: dict, issues: list) -> None:
+    text_columns = [
+        info["mapped_to"].strip()
+        for info in mapping.values()
+        if isinstance(info, dict) and info.get("field_type") == "text"
+        and info.get("mapped_to", "").strip() not in ("", "unknown")
+        and info.get("mapped_to", "").strip() in df.columns
+    ]
+
+    SIMILARITY_THRESHOLD = 0.90
+    total_rows = len(df)
+
+    for col in text_columns:
+        unique_vals = sorted(set(
+            str(v).strip()
+            for v in df[col].dropna()
+            if str(v).strip() != ""
+        ))
+
+        if len(unique_vals) < 2 or len(unique_vals) > 100:
+            continue
+
+        # Skip identifier-style columns (invoice numbers, transaction IDs etc.)
+        # where most values are unique to their row — fuzzy matching on these
+        # produces false positives like "Kpmg-2024-1" vs "Kpmg-2024-2"
+        if total_rows > 0 and (len(unique_vals) / total_rows) > 0.5:
+            continue
+
+        already_flagged = set()
+        for i in range(len(unique_vals)):
+            for j in range(i + 1, len(unique_vals)):
+                val_a, val_b = unique_vals[i], unique_vals[j]
+                if val_a in already_flagged or val_b in already_flagged:
+                    continue
+
+                # Skip pairs that differ by a trailing number — these are 
+                # usually distinct sequential items (invoice 1 vs 2), not 
+                # spelling variants of the same thing
+                base_a = re.sub(r'\d+$', '', val_a).strip()
+                base_b = re.sub(r'\d+$', '', val_b).strip()
+                if base_a == base_b and val_a != val_b:
+                    continue
+
+                similarity = SequenceMatcher(None, val_a.lower(), val_b.lower()).ratio()
+                if SIMILARITY_THRESHOLD <= similarity < 1.0:
+                    issues.append({
+                        "row": "N/A",
+                        "column": col,
+                        "row_index": "N/A",
+                        "original_value": f"{val_a} / {val_b}",
+                        "issue": (
+                            f"Possible duplicate values in '{col}': '{val_a}' and '{val_b}' "
+                            f"look like they may refer to the same thing but are spelled "
+                            f"differently. Consider standardising to one format so they aren't "
+                            f"treated as separate entries in totals and breakdowns."
+                        ),
+                        "severity": "medium"
+                    })
+                    already_flagged.add(val_a)
+                    already_flagged.add(val_b)
+    return None
 
 # Function to check if any date column appears out of order relative to another date column in the same row
 def check_date_order(df: pd.DataFrame, mapping: dict, issues: list) -> None:

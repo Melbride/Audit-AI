@@ -328,4 +328,14 @@ div[class*="info"] button:hover,
     transform: translateY(0.5px) !important;
 }
 
+.standardize-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
 
+.btn-small {
+    width: auto;
+    padding: 6px 12px;
+    font-size: 12px;
+}

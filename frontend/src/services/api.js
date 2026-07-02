@@ -205,6 +205,12 @@ export const submitInlineCorrections = (formData) =>
         headers: { 'Content-Type': 'multipart/form-data' }
     })
 
+// Standardize a value
+export const standardizeValue = (formData) =>
+    API.post('/clean/standardize-value', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
 // Upload a corrected Excel file (downloaded, edited, and re-uploaded by the auditor)
 export const submitCorrectedExcel = (formData) =>
     API.post('/clean/submit-corrected-excel', formData, {
