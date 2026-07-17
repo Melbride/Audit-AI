@@ -1,4 +1,4 @@
-#!C:\Users\Regina Fredrick\Desktop\Audit-AI-System\backend\venv\Scripts\python.exe
+#!C:\Users\Regina Fredrick\Desktop\Audit-AI\backend\venv\Scripts\python.exe
 """Extract pdf structure in XML format"""
 
 import logging

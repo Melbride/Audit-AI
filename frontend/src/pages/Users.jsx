@@ -226,18 +226,28 @@ export default function Users({ user }) {
   // "Senior Auditor" -> "role-senior-auditor"
   const getRoleClass = (role) =>
     `role-${role.toLowerCase().replace(/\s+/g, "-")}`;
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("All");
 
-  // Base table headers; "Actions" column is only added for Admins
-  const headers = [
-    "Name",
-    "Email",
-    "Role",
-    "Assigned Client",
-    "Status",
-  ];
-
-  if (isAdmin) headers.push("Actions");
+  // Apply search across name, email and company_name
+  const matchesQuery = (u) => {
+    if (!query) return true;
+    const q = query.toLowerCase();
     return (
+      (u.full_name || "").toLowerCase().includes(q) ||
+      (u.email || "").toLowerCase().includes(q) ||
+      (u.company_name || "").toLowerCase().includes(q)
+    );
+  };
+
+  const visibleUsers = users.filter((u) => {
+    return (
+      matchesQuery(u) &&
+      (roleFilter === "All" || u.role === roleFilter)
+    );
+  });
+
+  return (
     <div className="users-page">
       {/* Header with page title and "Add User" button (Admin only) */}
       <div className="users-header">
@@ -258,81 +268,74 @@ export default function Users({ user }) {
         </div>
       </div>
 
-      {/* Users table: loading state, empty state, or populated table */}
+      {/* Users area with search and role dropdown */}
       <div className="users-card">
         {loading ? (
           <p className="page-message">Loading users...</p>
-        ) : users.length === 0 ? (
-          <p className="page-message">No users yet.</p>
         ) : (
-          <table className="users-table">
-            <thead>
-              <tr>
-                {headers.map((header) => (
-                  <th key={header}>{header}</th>
+          <div className="users-list-root">
+            <div className="users-search-row">
+              <select
+                className="form-select role-select"
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+              >
+                <option value="All">All Roles</option>
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
                 ))}
-              </tr>
-            </thead>
+              </select>
 
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.user_id}>
-                  <td className="user-name">
-                    {u.full_name}
-                  </td>
+              <input
+                className="form-input users-search-input"
+                placeholder="Search users by name, email or client..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
 
-                  <td className="user-email">
-                    {u.email}
-                  </td>
+            <div className="role-list">
+              {visibleUsers.length === 0 ? (
+                <div className="page-message">No users match your query.</div>
+              ) : (
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Assigned Client</th>
+                      <th>Status</th>
+                      {isAdmin && <th>Actions</th>}
+                    </tr>
+                  </thead>
 
-                  <td>
-                    <span
-                      className={`role-badge ${getRoleClass(
-                        u.role
-                      )}`}
-                    >
-                      {u.role}
-                    </span>
-                  </td>
+                  <tbody>
+                    {visibleUsers.map((u) => (
+                      <tr key={u.user_id}>
+                        <td className="user-name">{u.full_name}</td>
+                        <td className="user-email">{u.email}</td>
+                        <td>
+                          <span className={`role-badge ${getRoleClass(u.role)}`}>{u.role}</span>
+                        </td>
+                        <td className="user-client">{u.company_name || "—"}</td>
+                        <td>
+                          <span className={`user-status ${u.status.toLowerCase()}`}>{u.status}</span>
+                        </td>
 
-                  <td className="user-client">
-                    {u.company_name || "—"}
-                  </td>
-
-                  <td>
-                    <span
-                      className={`user-status ${u.status.toLowerCase()}`}
-                    >
-                      {u.status}
-                    </span>
-                  </td>
-
-                  {/* Edit/Delete actions only rendered for Admins */}
-                  {isAdmin && (
-                    <td>
-                      <button
-                        className="btn-link btn-edit"
-                        onClick={() =>
-                          openEditModal(u)
-                        }
-                      >
-                        Edit
-                      </button>
-
-                      <button
-                        className="btn-link btn-delete"
-                        onClick={() =>
-                          handleDelete(u)
-                        }
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        {isAdmin && (
+                          <td>
+                            <button className="btn-link btn-edit" onClick={() => openEditModal(u)}>Edit</button>
+                            <button className="btn-link btn-delete" onClick={() => handleDelete(u)}>Delete</button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
@@ -528,6 +531,7 @@ export default function Users({ user }) {
           </div>
         </div>
       )}
+
     </div>
   );
 }

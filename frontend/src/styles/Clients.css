@@ -61,6 +61,49 @@
   box-shadow: none !important;            
   overflow: hidden;
   margin-top: 14px;
+  padding: 18px;
+}
+
+.cl-client-picker {
+  display: grid;
+  gap: 16px;
+}
+
+.cl-picker-row {
+  display: grid;
+  gap: 8px;
+}
+
+.cl-detail-card {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.cl-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.cl-detail-row:last-child {
+  border-bottom: none;
+}
+
+.cl-detail-label {
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.cl-detail-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
 }
 
 .cl-loading,
@@ -283,4 +326,35 @@
   color: var(--muted);
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* KRA PIN table cells */
+.cl-td-kra--yes {
+  color: #1e8449;
+  font-weight: 600;
+  font-size: 13px;
+}
+.cl-td-kra--no {
+  color: #95a5a6;
+  font-size: 13px;
+}
+
+/* KRA PIN checkbox row in form */
+.cl-kra-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 8px;
+}
+.cl-kra-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.cl-kra-label {
+  margin: 0;
+  cursor: pointer;
+}
+.cl-kra-input {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }

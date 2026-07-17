@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from 'react-router-dom'
+﻿import { useLocation, useNavigate } from 'react-router-dom'
 import '../styles/Layout.css'
 
 // Static list of sidebar navigation items.
@@ -82,13 +82,38 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+  {
+  key: "analysis",
+  path: "/analysis",      // â† add this line
+  label: "Analysis",       // (also capitalized to match the others, optional)
+  icon: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 3v18h18M7 16l4-4 4 4 4-6" />
+    </svg>
+  ),
+},
 ];
+
 
 // Layout: app shell with a sidebar (logo, nav links, user info/logout)
 
 export default function Layout({ user, onLogout, children }) {
   const location = useLocation()
   const navigate = useNavigate()
+
+  const adminNavItems = user?.role === "Admin" ? [
+    {
+      key: "login-management",
+      path: "/login-management",
+      label: "Login Management",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M4 5h16M4 9h16M6 13h12M6 17h12" />
+          <path d="M15 13c1.657 0 3 1.343 3 3v1H6v-1c0-1.657 1.343-3 3-3" />
+        </svg>
+      ),
+    },
+  ] : [];
 
   // Determines whether a given nav item should be styled as "active"
   // based on the current route. Some nav items map to multiple paths
@@ -107,6 +132,9 @@ export default function Layout({ user, onLogout, children }) {
       return ["/upload", "/mapping", "/clean", "/analysis", "/corrected-results"]
         .includes(location.pathname)
     }
+    if (item.key === "login-management") {
+      return location.pathname.startsWith("/login-management")
+    }
     // Default: exact path match
     return location.pathname === item.path
   }
@@ -120,14 +148,14 @@ export default function Layout({ user, onLogout, children }) {
         {/* Logo */}
         <div className="layout-logo">
           <div className="layout-logo-icon">
-            <img src="/favicon.svg" alt="Audit AI logo" />
+            <img src="/csa-logo.png" alt="Audit AI logo" />
           </div>
           <span className="layout-logo-text">Audit AI</span>
         </div>
 
-        {/* Nav links — clicking navigates via react-router, active item is highlighted */}
+        {/* Nav links â€” clicking navigates via react-router, active item is highlighted */}
         <nav className="layout-nav">
-          {NAV_ITEMS.map(item => (
+          {[...NAV_ITEMS, ...adminNavItems].map(item => (
             <div
               key={item.key}
               onClick={() => navigate(item.path)}
@@ -139,7 +167,7 @@ export default function Layout({ user, onLogout, children }) {
           ))}
         </nav>
 
-        {/* User info + logout — name/role/email are optional (rendered only if present) */}
+        {/* User info + logout â€” name/role/email are optional (rendered only if present) */}
         <div className="layout-user">
           <div className="layout-user-name">{user?.full_name}</div>
           {user?.role  && <div className="layout-user-role">{user.role}</div>}
@@ -149,7 +177,7 @@ export default function Layout({ user, onLogout, children }) {
 
       </aside>
 
-      {/* Page content — whatever page component is currently routed */}
+      {/* Page content â€” whatever page component is currently routed */}
       <main className="layout-main">
         {children}
       </main>

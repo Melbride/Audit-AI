@@ -217,4 +217,59 @@ export const submitCorrectedExcel = (formData) =>
         headers: { 'Content-Type': 'multipart/form-data' }
     })
 
+// ===============================
+// REPORTS (Month 3) — versioned reports/report_versions/report_approvals
+// system, served from /api/reports (see report_routes.py)
+// ===============================
+
+// Generate a new report from a cleaned file (creates the report + version 1)
+// data = { client_id, file_id, file_type, report_type, year, month, start_date, end_date, commentary, generated_by }
+export const generateReport = (data) =>
+    API.post('/api/reports/generate', data)
+
+// List reports, optionally filtered to one client
+export const getReports = (clientId) =>
+    API.get('/api/reports', clientId ? { params: { client_id: clientId } } : undefined)
+
+// Fetch a report's current version, edit history, and full detail
+export const getReport = (reportId) =>
+    API.get(`/api/reports/${reportId}`)
+
+// data = { commentary, edited_by }
+export const updateReportCommentary = (reportId, data) =>
+    API.patch(`/api/reports/${reportId}/commentary`, data)
+
+// data = { insights: [{ id, severity, text }], edited_by }
+export const updateReportInsights = (reportId, data) =>
+    API.patch(`/api/reports/${reportId}/insights`, data)
+
+// Approve the current version. Restricted to Engagement Partner (backend-enforced).
+// data = { notes }
+export const approveReport = (reportId, data) =>
+    API.post(`/api/reports/${reportId}/approve`, data)
+
+// Send the current version back for revision. Restricted to Engagement Partner.
+// data = { notes }
+export const requestReportChanges = (reportId, data) =>
+    API.post(`/api/reports/${reportId}/request-changes`, data)
+
+// ===============================
+// LOGIN MANAGEMENT
+// ===============================
+
+// Get login history for a user
+export const getUserLoginHistory = (userId) =>
+    API.get(`/users/${userId}/login-history`);
+
+// Reset a user's password
+export const resetUserPassword = (userId, newPassword) =>
+    API.put(`/users/${userId}/reset-password`, {
+        new_password: newPassword,
+    });
+
+// Lock or unlock a user's account
+export const setUserLoginLock = (userId, locked) =>
+    API.put(`/users/${userId}/login-lock`, {
+        locked,
+    });
 export default API

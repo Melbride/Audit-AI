@@ -1,0 +1,271 @@
+/* LoginManagement.css */
+
+.login-mgmt-page {
+  width: 100%;
+  max-width: 640px;
+}
+
+/* Header */
+
+.login-mgmt-header {
+  margin-bottom: 16px;
+}
+
+.login-mgmt-back {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+  transition: color var(--transition);
+}
+
+.login-mgmt-back:hover {
+  color: var(--primary);
+}
+
+.login-mgmt-title h1 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.login-mgmt-title h1::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+.login-mgmt-title p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.login-mgmt-client {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* Card */
+
+.login-mgmt-card {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px 20px;
+}
+
+.page-message {
+  padding: 16px;
+  color: var(--text-soft);
+  font-size: 13px;
+  background: var(--background);
+}
+
+/* Sections */
+
+.login-section {
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+
+.login-section:first-of-type {
+  border-top: none;
+}
+
+.login-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.login-section-hint {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+}
+
+.login-section .btn {
+  min-width: 200px;
+}
+
+/* Login access badge */
+
+.login-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+.login-badge.active {
+  color: var(--success);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.login-badge.locked {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+/* Buttons (self-contained so this page doesn't depend on Users.css) */
+
+.btn {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: background var(--transition), color var(--transition), opacity var(--transition);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--background);
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--danger);
+  color: var(--background);
+}
+
+/* Error box */
+
+.error-box {
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  border-radius: 6px;
+  border: 1px solid var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+/* Form fields */
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.form-input {
+  width: 100%;
+  height: 34px;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--background);
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.form-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+}
+
+/* Login history table */
+
+.login-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.login-user-details {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+.login-history-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-soft);
+  background: var(--surface-hover);
+  border-bottom: 1px solid var(--border);
+}
+
+.login-history-table td {
+  padding: 6px 8px;
+  color: var(--text-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.login-history-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.login-result {
+  font-weight: 600;
+}
+
+.login-result.success {
+  color: var(--success);
+}
+
+.login-result.failed {
+  color: var(--danger-text);
+}
+
+/* Responsive */
+
+@media (max-width: 700px) {
+  .login-mgmt-card {
+    padding: 4px 14px;
+  }
+}

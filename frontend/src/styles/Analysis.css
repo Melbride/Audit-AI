@@ -1,0 +1,260 @@
+/* Analysis Page */
+.analysis {
+    padding: 0 12px 12px;
+    margin: 0;
+}
+.page-title {
+    margin-bottom: 18px;
+}
+.page-title h1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 4px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+}
+.page-title h1::before {
+    content: '';
+    width: 4px;
+    height: 18px;
+    border-radius: 2px;
+    background-color: var(--primary);
+}
+.page-title p {
+    margin: 0;
+    color: var(--text-soft);
+    font-size: 13px;
+}
+/* KPI Cards */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+}
+.kpi-card {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  transition: background var(--transition),
+              border-color var(--transition);
+}
+.kpi-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--primary);
+}
+
+.kpi-card h4 {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.kpi-card h2 {
+  margin: 12px 0 6px;
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.kpi-card span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+/* Sections */
+.dashboard-section {
+  margin-bottom: 24px;
+}
+
+.section-header {
+  margin-bottom: 14px;
+}
+
+.section-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-header h2::before {
+  content: "";
+  width: 4px;
+  height: 15px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+/* Chart Grid */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 16px;
+}
+
+.chart-card {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  transition: background var(--transition),
+              border-color var(--transition);
+}
+
+.chart-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--primary);
+}
+
+.chart-card h3 {
+  margin: 0 0 18px;
+  color: var(--text);
+  font-size: 14px;
+}
+/* Summary Cards */
+
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px,1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.summary-card {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.summary-card h4 {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.summary-card h2 {
+  margin-top: 10px;
+  color: var(--text);
+}
+/* Inventory */
+.inventory-value {
+  display: flex;
+  height: 320px;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+}
+
+.inventory-value h1 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 38px;
+}
+
+.inventory-value p {
+  margin-top: 10px;
+  color: var(--text-soft);
+}
+/* AI Insights */
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(260px,1fr));
+  gap: 14px;
+}
+
+.insight-card {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  border-radius: 10px;
+  padding: 16px;
+  transition: background var(--transition),
+              border-color var(--transition);
+}
+
+.insight-card:hover {
+  background: var(--surface-hover);
+}
+
+.insight-card h3 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.insight-card p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+  font-size: 13px;
+}
+/* Footer */
+.dashboard-footer {
+  margin-top: 30px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.dashboard-footer p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+/* Recharts */
+.recharts-cartesian-axis-tick-value {
+  fill: var(--text-soft);
+  font-size: 12px;
+}
+
+.recharts-legend-item-text {
+  color: var(--text) !important;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+.recharts-default-tooltip {
+  background: var(--background) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  color: var(--text) !important;
+}
+.recharts-tooltip-label,
+.recharts-tooltip-item {
+  color: var(--text) !important;
+}
+/* Responsive */
+@media (max-width: 992px) {
+
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+}
+@media (max-width: 768px) {
+  .kpi-grid,
+  .summary-cards,
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+  .chart-card {
+    padding: 14px;
+  }
+  .page-title h1 {
+    font-size: 16px;
+  }
+  .kpi-card h2 {
+    font-size: 22px;
+  }
+  .inventory-value h1 {
+    font-size: 30px;
+  }
+}

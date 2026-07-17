@@ -1,52 +1,52 @@
-/* App.css */
+﻿/* App.css */
 
 /* Tokens */
 :root {
-  /* Brand */
-  --primary: #2DD4BF;           /* Teal for accents */
-  --primary-hover: #14B8A6;     /* Darker teal */
-  --secondary: #94A3B8;         /* Muted blue-grey */
+  /* Reference image palette */
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --secondary: #64748B;
 
-  --accent: #38BDF8;            /* Sky Blue for icons and highlights */
-  --accent-hover: #0EA5E9;      /* Darker sky blue */
+  --accent: #7C3AED;
+  --accent-hover: #6D28D9;
 
-  --info: #38BDF8;
-  --info-bg: #0C4A6E;
+  --info: #2563EB;
+  --info-bg: #EFF6FF;
 
   /* Backgrounds */
-  --background: #0F172A;        /* Base UI background */
-  --surface: #1E293B;           /* Card and container background */
-  --surface-hover: #334155;     /* Interactive hover state */
+  --background: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-hover: #EFF6FF;
 
   --white: #FFFFFF;
   --white-rgb: 255, 255, 255;
 
   /* Text */
-  --text: #F8FAFC;              /* Main text */
-  --text-soft: #CBD5E1;         /* Secondary text */
-  --muted: #64748B;             /* Muted icons and placeholder text */
+  --text: #111827;
+  --text-soft: #4B5563;
+  --muted: #6B7280;
 
   /* Borders */
-  --border: #334155;            /* Container dividers */
-  --border-strong: #475569;     /* Form focus boundaries */
+  --border: #E5E7EB;
+  --border-strong: #CBD5E1;
 
   /* Success */
-  --success: #10B981;
-  --success-bg: #064E3B;
-  --success-border: #047857;
+  --success: #16A34A;
+  --success-bg: #DCFCE7;
+  --success-border: #86EFAC;
 
   /* Warning */
-  --warning: #F59E0B;
-  --warning-solid: #D97706;
-  --warning-bg: #451A03;
-  --warning-bg-light: #78350F;
-  --warning-border: #B45309;
+  --warning: #EAB308;
+  --warning-solid: #CA8A04;
+  --warning-bg: #FEF9C3;
+  --warning-bg-light: #FEF3C7;
+  --warning-border: #FDE68A;
 
   /* Danger and logout */
-  --danger: #EF4444;            /* Vibrant crimson */
-  --danger-bg: #451212;         /* Dark red background */
-  --danger-text: #FCA5A5;       /* Highly visible red text */
-  --danger-rgb: 239, 68, 68;
+  --danger: #DC2626;
+  --danger-bg: #FEF2F2;
+  --danger-text: #B91C1C;
+  --danger-rgb: 220, 38, 38;
 
   /* Radius */
   --radius-sm: 6px;
@@ -54,13 +54,13 @@
   --radius-lg: 14px;
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
-  --shadow: 0 4px 12px rgba(0,0,0,0.4);
-  --shadow-md: 0 10px 24px rgba(0,0,0,0.6);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 16px 36px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 24px 54px rgba(15, 23, 42, 0.14);
 
   --transition: 160ms ease;
 }
-
 /* Reset */
 *,
 *::before,
@@ -171,7 +171,7 @@ a:hover {
 /* Primary */
 .btn-primary {
   background: var(--primary);
-  color: var(--background); /* Dark background text for contrast on bright cyan */
+  color: var(--white);
 }
 
 .btn-primary:hover {
@@ -181,7 +181,7 @@ a:hover {
 /* Accent */
 .btn-accent {
   background: var(--accent);
-  color: var(--background);
+  color: var(--white);
 }
 
 .btn-accent:hover {
@@ -396,3 +396,7 @@ tbody tr:last-child td {
 .hidden {
   display: none !important;
 }
+
+
+
+

@@ -3,13 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { getAllSubmissions } from "../services/api";
 import "../styles/Submissions.css";
 
-// Submissions page: read-only table listing every audit section
-// submission across all engagements, with a link to jump to the
-// related engagement's detail page.
+// Submissions page: read-only list of section submissions grouped by engagement.
 export default function Submissions({ user }) {
   const navigate = useNavigate();
-  const [submissions, setSubmissions] = useState([]); // all submissions shown in the table
-  const [loading, setLoading] = useState(true);        // true while submissions are being fetched
+  const [submissions, setSubmissions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedEngagementId, setSelectedEngagementId] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Load submissions once on mount
   useEffect(() => { loadData(); }, []);
@@ -26,7 +26,7 @@ export default function Submissions({ user }) {
     setLoading(false);
   };
 
-  // Formats an ISO date string into "12 Jan 2025 
+  // Formats an ISO date string into "12 Jan 2025 · 08:45"
   const formatDate = (dateStr) => {
     if (!dateStr) return "—";
     const date = new Date(dateStr);
@@ -37,6 +37,24 @@ export default function Submissions({ user }) {
     );
   };
 
+  const engagementOptions = Array.from(
+    submissions.reduce((map, submission) => {
+      const key = submission.engagement_id;
+      if (!map.has(key)) {
+        map.set(key, submission.engagement_name || "Untitled Engagement");
+      }
+      return map;
+    }, new Map())
+  ).map(([id, name]) => ({ engagement_id: id, engagement_name: name }));
+
+  const filteredEngagementOptions = engagementOptions.filter((option) =>
+    option.engagement_name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const selectedSubmissions = submissions.filter(
+    (s) => String(s.engagement_id) === String(selectedEngagementId)
+  );
+
   return (
     <div>
       {/* Header */}
@@ -45,48 +63,92 @@ export default function Submissions({ user }) {
         <p>All audit section submissions across every engagement</p>
       </div>
 
-      {/* Submissions table: loading state, empty state, or populated table */}
+      {/* Submission selector card */}
       <div className="sub-table-card">
         {loading ? (
           <p className="sub-loading">Loading submissions...</p>
         ) : submissions.length === 0 ? (
           <p className="sub-empty">No submissions yet.</p>
         ) : (
-          <table className="sub-table">
-            <thead>
-              <tr>
-                {["Engagement", "Section", "Status", "Submitted By", "Last Updated", "Notes", "Actions"].map((h) => (
-                  <th key={h}>{h}</th>
+          <div className="sub-dropdown-card">
+            <label className="sub-label" htmlFor="engagement-search">
+              Search engagements
+            </label>
+            <input
+              id="engagement-search"
+              className="sub-input"
+              type="search"
+              placeholder="Filter by engagement name"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+
+            <label className="sub-label" htmlFor="engagement-select">
+              Select engagement
+            </label>
+            <select
+              id="engagement-select"
+              className="sub-select"
+              value={selectedEngagementId}
+              onChange={(e) => setSelectedEngagementId(e.target.value)}
+            >
+              <option value="">— Choose an engagement —</option>
+              {filteredEngagementOptions.length === 0 ? (
+                <option value="" disabled>
+                  No engagements match your search
+                </option>
+              ) : (
+                filteredEngagementOptions.map((option) => (
+                  <option key={option.engagement_id} value={option.engagement_id}>
+                    {option.engagement_name}
+                  </option>
+                ))
+              )}
+            </select>
+
+            {selectedEngagementId ? (
+              <div className="sub-list-card">
+                <div className="sub-list-header">
+                  <span>{selectedSubmissions.length} submission{selectedSubmissions.length === 1 ? "" : "s"} found</span>
+                  <button
+                    type="button"
+                    className="sub-btn-view"
+                    onClick={() => navigate(`/engagements/${selectedEngagementId}`)}
+                  >
+                    View Engagement
+                  </button>
+                </div>
+                {selectedSubmissions.map((s) => (
+                  <div key={s.submission_id} className="sub-list-item">
+                    <div className="sub-list-item-row">
+                      <span className="sub-list-item-label">Section</span>
+                      <span className="sub-list-item-value">{s.section_name || "—"}</span>
+                    </div>
+                    <div className="sub-list-item-row">
+                      <span className="sub-list-item-label">Status</span>
+                      <span className="sub-list-item-value">{s.status}</span>
+                    </div>
+                    <div className="sub-list-item-row">
+                      <span className="sub-list-item-label">Submitted By</span>
+                      <span className="sub-list-item-value">{s.submitted_by_name || "—"}</span>
+                    </div>
+                    <div className="sub-list-item-row">
+                      <span className="sub-list-item-label">Last Updated</span>
+                      <span className="sub-list-item-value">{formatDate(s.created_at)}</span>
+                    </div>
+                    {s.notes && (
+                      <div className="sub-list-item-row">
+                        <span className="sub-list-item-label">Notes</span>
+                        <span className="sub-list-item-value">"{s.notes}"</span>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {submissions.map((s) => (
-                <tr key={s.submission_id}>
-                  <td className="sub-table-name">{s.engagement_name || "—"}</td>
-                  <td className="sub-table-muted">{s.section_name || "—"}</td>
-                  {/* data-status drives the badge color via CSS */}
-                  <td className="sub-table-status">
-                    <span className="sub-status-badge" data-status={s.status}>
-                      {s.status}
-                    </span>
-                  </td>
-                  <td className="sub-table-muted">{s.submitted_by_name || "—"}</td>
-                  <td className="sub-table-small">{formatDate(s.created_at)}</td>
-                  <td className="sub-table-small">{s.notes ? `"${s.notes}"` : "—"}</td>
-                  <td className="sub-table-action">
-                    {/* Jump to the engagement this submission belongs to */}
-                    <button
-                      onClick={() => navigate(`/engagements/${s.engagement_id}`)}
-                      className="sub-btn-view"
-                    >
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              </div>
+            ) : (
+              <p className="sub-empty">Select an engagement to view its submissions.</p>
+            )}
+          </div>
         )}
       </div>
     </div>

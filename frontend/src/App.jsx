@@ -1,23 +1,26 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
-// AI pipeline pages 
+// AI pipeline pages
 import UploadPage from './pages/UploadPage'
 import MappingPage from './pages/MappingPage'
 import CleanPage from './pages/CleanPage'
 import AnalysisPage from './pages/AnalysisPage'
 import CorrectedResultsPage from './pages/CorrectedResultsPage'
 
-// App/management pages 
+// App/management pages
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Users from './pages/Users'
+import LoginManagement from './pages/LoginManagement'
 import Clients from './pages/Clients'
 import Engagements from './pages/Engagements'
 import EngagementDetail from './pages/EngagementDetail'
 import Notifications from './pages/Notifications'
 import Submissions from './pages/Submissions'
 import AllFiles from './pages/AllFiles'
+import Reports from './pages/Reports'
+import ReportDetail from './pages/ReportDetail'
 import Layout from './pages/Layout'
 import './App.css'
 
@@ -163,12 +166,53 @@ function App() {
             </RequireAuth>
           }
         />
+        {/* Reports (Month 3) */}
+        <Route
+          path="/reports"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Reports user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/reports/:reportId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <ReportDetail user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
         <Route
           path="/users"
           element={
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
                 <Users user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/login-management"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <LoginManagement user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/users/:userId/login-management"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <LoginManagement user={user} />
               </Layout>
             </RequireAuth>
           }

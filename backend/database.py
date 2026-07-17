@@ -103,9 +103,21 @@ def init_db():
             role VARCHAR(50) NOT NULL,
             assigned_client_id INT,
             status VARCHAR(50) DEFAULT 'Active',
+            login_locked TINYINT(1) DEFAULT 0,
+            failed_attempts INT DEFAULT 0,
+            last_login DATETIME,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'users' AND column_name = 'login_locked'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE users ADD COLUMN login_locked TINYINT(1) DEFAULT 0")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'users' AND column_name = 'failed_attempts'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE users ADD COLUMN failed_attempts INT DEFAULT 0")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'users' AND column_name = 'last_login'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_login DATETIME")
 
     # Password resets table. Stores temporary tokens for password reset requests.
     # Token must be unique. Expires after 1 hour.
@@ -118,6 +130,28 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Login history table. Tracks login attempts with IP/device metadata.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS login_history (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            ip_address VARCHAR(100),
+            device VARCHAR(255),
+            status VARCHAR(50) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'login_history' AND column_name = 'ip_address'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE login_history ADD COLUMN ip_address VARCHAR(100)")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'login_history' AND column_name = 'device'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE login_history ADD COLUMN device VARCHAR(255)")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'login_history' AND column_name = 'status'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE login_history ADD COLUMN status VARCHAR(50) NOT NULL")
 
     # Engagements table. Represents an audit engagement for a client for a specific financial year
     cursor.execute("""
