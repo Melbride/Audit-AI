@@ -63,6 +63,18 @@ const NAV_ITEMS = [
     ),
   },
   {
+    key: "reports",
+    path: "/reports",
+    label: "Reports",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <path d="M14 2v6h6" />
+        <path d="M9 13h6M9 17h6M9 9h1" />
+      </svg>
+    ),
+  },
+  {
     key: "users",
     path: "/users",
     label: "Users",
@@ -134,6 +146,12 @@ export default function Layout({ user, onLogout, children }) {
     }
     if (item.key === "login-management") {
       return location.pathname.startsWith("/login-management")
+    }
+    // Highlight Reports for the top-level list, a single report's detail
+    // view, and the client-scoped reports view (e.g. /clients/12/reports)
+    if (item.key === "reports") {
+      return location.pathname.startsWith("/reports") ||
+        /^\/clients\/[^/]+\/reports/.test(location.pathname)
     }
     // Default: exact path match
     return location.pathname === item.path

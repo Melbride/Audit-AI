@@ -270,9 +270,23 @@ export default function ReportReview({ reportId, user }) {
                 {Object.entries(version.financial_summary).map(([key, val]) => (
                   <div key={key} className="metric-card">
                     <div className="metric-label">{key.replace(/_/g, " ")}</div>
-                    <div className="metric-value">
-                      {typeof val === "number" ? formatCurrency(val) : val}
-                    </div>
+                    <div className="metric-label">
+  {typeof val === "object" ? val.label : key.replace(/_/g, " ")}
+</div>
+
+<div className="metric-value">
+  {typeof val === "object"
+    ? formatCurrency(val.value)
+    : typeof val === "number"
+      ? formatCurrency(val)
+      : val}
+</div>
+
+{typeof val === "object" && (
+  <div className={`metric-delta ${val.up ? "positive" : "negative"}`}>
+    {val.delta}
+  </div>
+)}
                   </div>
                 ))}
               </div>
