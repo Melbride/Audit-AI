@@ -12,6 +12,9 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 
 # File-reading libraries for PDF and DOCX extraction
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import pdfplumber
 from docx import Document
 
@@ -21,9 +24,11 @@ import json
 import uuid
 import os
 import sys
+import re
 import shutil
 import secrets
 import hashlib
+import io
 from dotenv import load_dotenv
 
 # AI detection helpers, used to identify columns and suggest file types
@@ -36,15 +41,23 @@ from database import (
     save_cleaning_corrections, get_cleaning_corrections,
     save_fingerprint, get_fingerprint,
     save_cleaning_snapshot, get_cleaning_snapshot,
+    save_cleaned_registry, get_cleaned_files_for_client, get_cleaned_file_data,
 )
 
 # Cleaning engine, Excel export, and Excel diff logic
 from cleaner import clean_dataframe
 from excel_export import build_cleaning_workbook
 from excel_diff import diff_uploaded_against_snapshot
+from dateutil import parser as dateutil_parser
+from analyzer import calculate_breakdowns, calculate_monthly_trend, detect_anomalies, generate_ai_insights, generate_financial_ai_insights, determine_analysis_scope
 
-from analyzer import calculate_breakdowns, calculate_monthly_trend, detect_anomalies, generate_ai_insights
-
+from engines.accounting_validation.trial_balance_validator import validate_trial_balance
+from engines.account_mapping.account_classifier import build_account_mapping_result
+from database import save_account_mapping, get_account_mapping
+from engines.financial_reporting.statement_generator import generate_financial_statements
+from engines.financial_reporting.financial_ratios import calculate_financial_ratios
+from engines.financial_reporting.financial_analytics import calculate_financial_analytics
+from engines.financial_reporting.comparative_analytics import generate_comparative_analytics
 # Load environment variables from the .env file
 load_dotenv()
 
@@ -178,43 +191,58 @@ def calculate_fill_rates(df: pd.DataFrame) -> dict:
 
 # Check that each column's declared field_type actually matches its real data. Prevents usersfrom mistakenly marking a text column as numeric/date
 # Check that each column's declared field_type actually matches its real data. Prevents users from mistakenly marking a text column as numeric/date
+
 def validate_field_types_against_data(df: pd.DataFrame, mapping: dict) -> list:
     problems = []
+    def try_parse_date(val_str: str) -> bool:
+        # Strip ordinal suffixes: 1st, 2nd, 3rd, 22nd, 28th ...
+        cleaned = re.sub(r'(\d+)(st|nd|rd|th)\b', r'\1', val_str, flags=re.IGNORECASE).strip()
+        # Bare numbers are not dates (e.g. '999', '42')
+        if re.fullmatch(r'\d+', cleaned):
+            return False
+        # dateutil handles any date format without a hardcoded list
+        try:
+            dateutil_parser.parse(cleaned, default=pd.Timestamp('2000-01-01'))
+            return True
+        except (ValueError, OverflowError):
+            return False
+
     for original_col, info in mapping.items():
         if not isinstance(info, dict):
             continue
         field_type = info.get("field_type")
         mapped_to = info.get("mapped_to")
-        # Skip columns not present in this file, or left as unknown
         if original_col not in df.columns or field_type in (None, "unknown") or mapped_to in (None, "unknown"):
             continue
-        # Only look at non-empty values, an empty column shouldn't fail validation
         values = df[original_col].dropna().replace("", None).dropna()
         if len(values) == 0:
             continue
+
         if field_type == "numeric":
-            convertible = pd.to_numeric(values, errors="coerce")
+            def strip_for_check(v):
+                v = str(v).strip()
+                # If it's already a plain number, no stripping needed
+                try:
+                    float(v)
+                    return v
+                except ValueError:
+                    pass
+                is_negative = v.startswith("(") and v.endswith(")")
+                v = v.strip("()%")
+                v = re.sub(r"[^\d.-]", "", v)
+                return ("-" + v) if is_negative and not v.startswith("-") else v
+
+            cleaned_values = values.apply(strip_for_check)
+            convertible = pd.to_numeric(cleaned_values, errors="coerce")
             failure_rate = convertible.isna().mean()
-            # Allow a small tolerance for stray bad cells, but flag if most values aren't numeric
             if failure_rate > 0.3:
                 problems.append(
                     f"'{original_col}' is marked as Number but most of its values "
                     f"aren't numbers (e.g. '{values.iloc[0]}'). Please check the field type."
                 )
+
         elif field_type == "date":
-            # Try parsing each value with flexible format detection, matching the
-            # same logic clean_dates() uses, since dates in real files come in
-            # multiple formats (DD/MM/YYYY, YYYY-MM-DD, etc.) even within one column
-            failures = 0
-            for val in values:
-                val_str = str(val).strip()
-                try:
-                    dayfirst = not (len(val_str) >= 10 and val_str[4] == '-' and val_str[7] == '-')
-                    parsed_val = pd.to_datetime(val_str, dayfirst=dayfirst, errors='coerce')
-                    if pd.isna(parsed_val):
-                        failures += 1
-                except Exception:
-                    failures += 1
+            failures = sum(1 for val in values if not try_parse_date(str(val).strip()))
             failure_rate = failures / len(values)
             if failure_rate > 0.3:
                 problems.append(
@@ -397,7 +425,64 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     report = rebuild_report_counts(report)
     # can_proceed is only true once every issue (high, medium, and info severity) has been resolved
     report["can_proceed"] = report["total_issues"] == 0
+    # Save the current cleaned state so the auditor can retun to it and also download
+    save_cleaned_registry(file_id, client_id, file_type, cleaned_df, report)
     return cleaned_df, report
+
+def build_financial_analysis_context(cleaned_df: pd.DataFrame, mapping: dict, client_id: str, file_type: str) -> dict:
+    breakdowns = calculate_breakdowns(cleaned_df, mapping)
+    monthly_trend = calculate_monthly_trend(cleaned_df, mapping)
+    anomalies = detect_anomalies(monthly_trend)
+    generic_scope = determine_analysis_scope(breakdowns, monthly_trend)
+
+    context = {
+        "analysis_scope": generic_scope,
+        "analysis_basis": "generic_columns",
+        "breakdowns": breakdowns,
+        "monthly_trend": monthly_trend,
+        "anomalies": anomalies,
+        "financial_statements": None,
+        "financial_ratios": None,
+        "financial_analytics": None,
+        "comparative_analytics": None,
+        "generic_analysis": {
+            "analysis_scope": generic_scope,
+            "breakdowns": breakdowns,
+            "monthly_trend": monthly_trend,
+            "anomalies": anomalies,
+        },
+    }
+
+    account_mapping = get_account_mapping(client_id, file_type)
+    if not account_mapping:
+        return context
+
+    statements = generate_financial_statements(cleaned_df, mapping, account_mapping)
+    if not statements.get("applicable"):
+        return context
+
+    ratios = calculate_financial_ratios(
+        statements["income_statement"],
+        statements["balance_sheet"],
+    )
+    statements["financial_ratios"] = ratios
+
+    financial_analytics = calculate_financial_analytics(statements, ratios)
+    comparative_analytics = generate_comparative_analytics(
+        cleaned_df,
+        mapping,
+        account_mapping,
+        grain="year",
+    )
+    context.update({
+        "analysis_scope": "financial_statements",
+        "analysis_basis": "classified_accounts",
+        "financial_statements": statements,
+        "financial_ratios": ratios,
+        "financial_analytics": financial_analytics,
+        "comparative_analytics": comparative_analytics,
+    })
+    return context
 
 # Pydantic model for a client record
 class Client(BaseModel):
@@ -775,6 +860,7 @@ async def get_uploads_endpoint(client_id: str):
     uploads = get_uploads(client_id)
     return {"client_id": client_id, "total_uploads": len(uploads), "uploads": uploads}
 
+
 # Run the cleaning engine on a file and return the cleaned data along with the validation report
 @app.post("/clean")
 async def clean_file(
@@ -1048,6 +1134,55 @@ async def submit_inline_corrections_endpoint(
         "message": f"{len(corrections_list)} correction(s) saved and re-cleaned."
     }
 
+# List every file for a client that has a cleaned version saved, most recently updated first. Lets the auditor come back later and see what's ready.
+@app.get("/clients/{client_id}/cleaned-files")
+async def list_cleaned_files(client_id: str):
+    files = get_cleaned_files_for_client(client_id)
+    return {"client_id": client_id, "total": len(files), "files": files}
+
+# Download the current cleaned version of a file directly, plain and clean.
+@app.get("/cleaned-files/{file_id}/download")
+async def download_cleaned_file(file_id: str, client_id: str, file_type: str = "general"):
+    record = get_cleaned_file_data(file_id, client_id, file_type)
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="No cleaned version found for this file. Please run cleaning first."
+        )
+
+    df = pd.DataFrame(record["cleaned_data"])
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Cleaned Data")
+    output.seek(0)
+    # Use the original uploaded filename if available, otherwise default to a generic name
+    download_filename = record.get("filename") or f"{file_id}_cleaned.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{download_filename}"'}
+    )
+
+# Return the cleaned data as JSON for viewing inline in the browser
+@app.get("/cleaned-files/{file_id}/view")
+async def view_cleaned_file(file_id: str, client_id: str, file_type: str = ""):
+    record = get_cleaned_file_data(file_id, client_id, file_type)
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="No cleaned version found for this file. Please run cleaning first."
+        )
+    return {
+        "file_id": file_id,
+        "client_id": client_id,
+        "file_type": file_type,
+        "filename": record.get("filename"),
+        "cleaned_data": record["cleaned_data"],
+        "total_issues": record.get("total_issues", 0),
+        "can_proceed": bool(record.get("can_proceed")),
+        "updated_at": str(record.get("updated_at")),
+    }
+
 # Standardize a near-duplicate value across an entire column in one action.
 # Finds every row where the column matches from_value and replaces it with
 # to_value, saving one correction record per affected row, then re-cleans.
@@ -1148,18 +1283,13 @@ async def analyze_financials(
             status_code=400,
             detail="This file still has unresolved issues. Please finish cleaning before running analysis."
         )
-    # Perform financial analysis calculations
-    breakdowns = calculate_breakdowns(cleaned_df, mapping)
-    monthly_trend = calculate_monthly_trend(cleaned_df, mapping)
-    anomalies = detect_anomalies(monthly_trend)
-    # Return the analysis results along with a success message
+    analysis_context = build_financial_analysis_context(cleaned_df, mapping, client_id, file_type)
+
     return {
         "client_id": client_id,
         "file_id": file_id,
         "file_type": file_type,
-        "breakdowns": breakdowns,
-        "monthly_trend": monthly_trend,
-        "anomalies": anomalies,
+        **analysis_context,
         "message": "Financial analysis completed successfully."
     }
 
@@ -1185,13 +1315,23 @@ async def analyze_insights(
             status_code=400,
             detail="This file still has unresolved issues. Please finish cleaning before generating insights."
         )
-    # Perform financial analysis calculations
-    breakdowns = calculate_breakdowns(cleaned_df, mapping)
-    monthly_trend = calculate_monthly_trend(cleaned_df, mapping)
-    anomalies = detect_anomalies(monthly_trend)
+    analysis_context = build_financial_analysis_context(cleaned_df, mapping, client_id, file_type)
     # Generate AI insights based on the calculated financial data
     try:
-        insights = generate_ai_insights(breakdowns, monthly_trend, anomalies)
+        if analysis_context.get("financial_analytics"):
+            insights = generate_financial_ai_insights(
+                analysis_context.get("financial_statements"),
+                analysis_context.get("financial_ratios"),
+                analysis_context.get("financial_analytics"),
+                analysis_context.get("comparative_analytics"),
+                analysis_context.get("generic_analysis"),
+            )
+        else:
+            insights = generate_ai_insights(
+                analysis_context.get("breakdowns", {}),
+                analysis_context.get("monthly_trend", {}),
+                analysis_context.get("anomalies", []),
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Insight generation failed: {str(e)}")
     # Return the AI insights along with a success message
@@ -1199,10 +1339,138 @@ async def analyze_insights(
         "client_id": client_id,
         "file_id": file_id,
         "file_type": file_type,
+        "analysis_scope": analysis_context.get("analysis_scope"),
+        "analysis_basis": analysis_context.get("analysis_basis"),
         "ai_insights": insights,
         "message": "AI insights generated successfully."
     }
 
+
+# Validates a trial balance / general ledger file after cleaning.
+@app.post("/validate-trial-balance")
+async def validate_trial_balance_endpoint(
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general")
+):
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="No saved mapping found for this client. Please complete column mapping first."
+        )
+    cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+    if not report.get("can_proceed", False):
+        raise HTTPException(
+            status_code=400,
+            detail="This file still has unresolved cleaning issues. Please finish cleaning before validating the trial balance."
+        )
+    validation_result = validate_trial_balance(cleaned_df, mapping)
+    return {
+        "client_id": client_id,
+        "file_id": file_id,
+        "file_type": file_type,
+        "trial_balance_validation": validation_result,
+    }
+
+# Suggest standard category classifications
+@app.post("/detect-account-mapping")
+async def detect_account_mapping_endpoint(
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general")
+):
+    # Get mapping 
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="No saved mapping found for this client. Please complete column mapping first."
+        )
+
+    cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+    if not report.get("can_proceed", False):
+        raise HTTPException(
+            status_code=400,
+            detail="This file still has unresolved cleaning issues. Please finish cleaning first."
+        )
+    saved_account_mapping = get_account_mapping(client_id, file_type)
+    result = build_account_mapping_result(cleaned_df, mapping, saved_account_mapping)
+    return {
+        "client_id": client_id,
+        "file_id": file_id,
+        "file_type": file_type,
+        "account_mapping": result,
+    }
+
+# Saves the auditor's confirmed account category classifications.
+@app.post("/save-account-mapping")
+async def save_account_mapping_endpoint(
+    client_id: str = Form(...),
+    file_type: str = Form(...),
+    accounts: str = Form(...),
+    confirmed_by: str = Form(None)
+):
+    try:
+        accounts_list = json.loads(accounts)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid accounts format.")
+    if not accounts_list:
+        raise HTTPException(status_code=400, detail="No accounts provided.")
+
+    save_account_mapping(client_id, file_type, accounts_list, confirmed_by)
+    return {
+        "client_id": client_id,
+        "file_type": file_type,
+        "accounts_saved": len(accounts_list),
+        "message": "Account mapping saved successfully."
+    }
+
+# Generates the Income Statement and Balance Sheet from confirmed account classifications. Requires account mapping to have been
+# saved first — pure aggregation, no AI involved at this stage.
+@app.post("/generate-financial-statements")
+async def generate_financial_statements_endpoint(
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("general")
+):
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="No saved mapping found for this client. Please complete column mapping first."
+        )
+
+    cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+
+    if not report.get("can_proceed", False):
+        raise HTTPException(
+            status_code=400,
+            detail="This file still has unresolved cleaning issues. Please finish cleaning first."
+        )
+
+    account_mapping = get_account_mapping(client_id, file_type)
+    if not account_mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="No account mapping found for this client. Please complete account mapping first."
+        )
+
+    result = generate_financial_statements(cleaned_df, mapping, account_mapping)
+    if result.get("applicable"):
+        result["financial_ratios"] = calculate_financial_ratios(
+            result["income_statement"],
+            result["balance_sheet"],
+        )
+
+    return {
+        "client_id": client_id,
+        "file_id": file_id,
+        "file_type": file_type,
+        "financial_statements": result,
+        "financial_ratios": result.get("financial_ratios"),
+    }
+    
 # List all clients
 @app.get("/clients")
 def get_clients(db=Depends(get_db)):
@@ -1354,6 +1622,131 @@ def login(req: LoginRequest, db=Depends(get_db)):
             "user": {"user_id": user["user_id"], "full_name": user["full_name"],
                      "email": user["email"], "role": user["role"]}}
 
+GMAIL_USER = os.getenv("GMAIL_USER")
+GMAIL_APP_PASSWORD = os.getenv("app_password")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+def send_reset_email(to_email: str, token: str):
+    reset_link = f"{FRONTEND_URL}/password-reset/confirm/{token}"
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_USER
+    msg["To"] = to_email
+    msg["Subject"] = "Password Reset Request - Audit AI"
+    body = f"""Hello,
+
+You requested a password reset for your Audit AI account.
+
+Click the link below to reset your password:
+{reset_link}
+
+This link will expire in 1 hour.
+
+If you did not request this, please ignore this email.
+
+Best regards,
+The Audit AI Team"""
+    msg.attach(MIMEText(body, "plain"))
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_USER, to_email, msg.as_string())
+
+# Return everything needed to resume work on a file from the Client Details page.
+# Reads the actual file from disk to get columns and fill_rates so MappingPage
+# can run detection correctly on resume, exactly as a fresh upload would.
+@app.get("/files/{file_id}/resume-state")
+def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+
+    # Get the upload record
+    cursor.execute("SELECT * FROM uploads WHERE file_id = %s AND client_id = %s", (file_id, client_id))
+    upload = cursor.fetchone()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    file_type = upload.get("file_type") or "other"
+    filename = upload.get("filename") or upload.get("file_name") or ""
+
+    # Read the actual file from disk to get columns and fill_rates
+    columns = []
+    fill_rates = {}
+    fingerprint = ""
+    row_count = upload.get("row_count") or 0
+    save_path, file_ext = locate_uploaded_file(file_id)
+    if save_path:
+        try:
+            df = read_file_to_df(save_path, file_ext)
+            if df is not None:
+                columns = list(df.columns)
+                fill_rates = calculate_fill_rates(df)
+                fingerprint = compute_schema_fingerprint(columns)
+                row_count = len(df)
+        except Exception:
+            pass
+
+    # The uploads table stores the file extension (e.g. 'xlsx'), not the mapped
+    # category (e.g. 'general_ledger'). Resolve the real file_type by finding
+    # which column_mappings entry covers the most columns from this file.
+    if columns:
+        placeholders = ",".join(["%s"] * len(columns))
+        cursor.execute(
+            f"SELECT file_type, COUNT(*) AS cnt FROM column_mappings "
+            f"WHERE client_id = %s AND original_column IN ({placeholders}) "
+            f"GROUP BY file_type ORDER BY cnt DESC LIMIT 1",
+            (client_id, *columns)
+        )
+        ft_row = cursor.fetchone()
+        if ft_row:
+            file_type = ft_row["file_type"]
+
+    # Check if a mapping exists
+    cursor.execute(
+        "SELECT COUNT(*) AS cnt FROM column_mappings WHERE client_id = %s AND file_type = %s",
+        (client_id, file_type)
+    )
+    has_mapping = cursor.fetchone()["cnt"] > 0
+
+    # Check cleaned registry
+    cursor.execute(
+        "SELECT total_issues, can_proceed, updated_at FROM cleaned_files_registry WHERE file_id = %s AND client_id = %s AND file_type = %s",
+        (file_id, client_id, file_type)
+    )
+    cleaned = cursor.fetchone()
+
+    # Check if any corrections exist — tells us the auditor was on CorrectedResultsPage
+    cursor.execute(
+        "SELECT COUNT(*) AS cnt FROM cleaning_corrections WHERE file_id = %s AND client_id = %s AND file_type = %s",
+        (file_id, client_id, file_type)
+    )
+    has_corrections = cursor.fetchone()["cnt"] > 0
+
+    # Determine stage
+    if cleaned and cleaned["can_proceed"]:
+        stage = "clean"
+    elif cleaned and not cleaned["can_proceed"]:
+        stage = "cleaning_in_progress"
+    elif has_mapping:
+        stage = "mapped"
+    else:
+        stage = "uploaded"
+
+    return {
+        "file_id": file_id,
+        "client_id": client_id,
+        "filename": filename,
+        "file_type": file_type,
+        "row_count": row_count,
+        "columns": columns,
+        "fill_rates": fill_rates,
+        "fingerprint": fingerprint,
+        "upload_time": str(upload.get("upload_time") or ""),
+        "stage": stage,
+        "has_mapping": has_mapping,
+        "has_corrections": has_corrections,
+        "total_issues": cleaned["total_issues"] if cleaned else None,
+        "can_proceed": bool(cleaned["can_proceed"]) if cleaned else False,
+        "last_cleaned_at": str(cleaned["updated_at"]) if cleaned else None,
+    }
+
 # Generate a password reset token for a user's email and store it with a one hour expiry
 @app.post("/auth/password-reset-request")
 def password_reset_request(req: PasswordResetRequest, db=Depends(get_db)):
@@ -1368,13 +1761,17 @@ def password_reset_request(req: PasswordResetRequest, db=Depends(get_db)):
     cursor2.execute("INSERT INTO password_resets (user_id, token, expires_at) VALUES (%s, %s, %s)",
                     (user["user_id"], token, expires_at))
     db.commit()
-    return {"message": "Password reset token generated", "token": token}
+    try:
+        send_reset_email(user["email"], token)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Token generated but email could not be sent: {str(e)}")
+    return {"message": "Password reset link sent to your email"}
 
 # Confirm a password reset using a valid, unexpired token and set the new password
 @app.post("/auth/password-reset-confirm")
 def password_reset_confirm(req: PasswordResetConfirm, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM password_resets WHERE token = %s AND expires_at > NOW()", (req.token,))
+    cursor.execute("SELECT * FROM password_resets WHERE token = %s AND expires_at > UTC_TIMESTAMP()", (req.token,))
     reset = cursor.fetchone()
     if not reset:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")

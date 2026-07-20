@@ -9,10 +9,10 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 function CleanPage( ) {
     const location = useLocation()
     const navigate = useNavigate()
-    const { uploadResult, clientId, fileType } = location.state || {}
+    const { uploadResult, clientId, fileType, cleanResult: resumedCleanResult } = location.state || {}
     const [currentUpload, setCurrentUpload] = useState(uploadResult)
     const [cleaning, setCleaning] = useState(false)
-    const [cleanResult, setCleanResult] = useState(null)
+    const [cleanResult, setCleanResult] = useState(resumedCleanResult || null)
     const [error, setError] = useState(null)
     const [downloaded, setDownloaded] = useState(false)
     const [showDownloadMessage, setShowDownloadMessage] = useState(false) // New state for temporary message
@@ -48,6 +48,12 @@ function CleanPage( ) {
         setTimeout(() => {
             setShowDownloadMessage(false)
         }, 5000)
+    }
+    // Handle downloading the final cleaned file directly, no highlighting, no correction workflow
+    const handleDownloadCleanedFile = () => {
+        if (!cleanResult) return
+        const url = `${API_BASE}/cleaned-files/${cleanResult.file_id}/download?client_id=${encodeURIComponent(clientId)}&file_type=${encodeURIComponent(fileType || 'other')}`
+        window.open(url, '_blank')
     }
     // Handle uploading the corrected Excel file
     const handleUploadCorrectedFile = async (e) => {
@@ -134,41 +140,53 @@ function CleanPage( ) {
                             <div className="stat-card"><h3>{report?.high_issues}</h3><p>High Issues</p></div>
                             <div className="stat-card"><h3>{report?.medium_issues}</h3><p>Medium Issues</p></div>
                         </div>
-                        {report?.total_issues > 0 ? (
+                        {/* Only show the issues summary when issues actually exist, otherwise show the all-clean message */}
+                        {cleanResult.can_proceed ? (
+                            <div className="all-clean">No issues found.</div>
+                        ) : (
                             <div className="issues-summary">
                                 <strong>{report.total_issues} issues found</strong> download the workbook below to see all issues highlighted and fix them in Excel, then upload the corrected file back.
                             </div>
-                        ) : (
-                            <div className="all-clean">No issues found.</div>
                         )}
                     </div>
 
                     <div className="card">
                         <h2 className="title">Cleaned Data Preview</h2>
                         
+                        {/* Only show the workbook/upload correction flow when issues remain.
+                            Once can_proceed is true there's nothing left to review or fix,
+                            so show the plain cleaned file download instead */}
                         <div className="correction-toolbar">
-                            <button className="btn btn-secondary" onClick={handleDownloadExcel}>
-                                Download Full Workbook
-                            </button>
-
-                            {downloaded && (
-                                <div className="upload-group">
-                                    <button className="btn btn-inline" onClick={() => correctedFileInputRef.current?.click()} disabled={uploadingCorrected}>
-                                        {uploadingCorrected ? 'Processing...' : 'Upload Corrected File'}
+                            {!cleanResult.can_proceed ? (
+                                <>
+                                    <button className="btn btn-secondary" onClick={handleDownloadExcel}>
+                                        Download Full Workbook
                                     </button>
-                                    <input type="file" accept=".xlsx" ref={correctedFileInputRef} style={{ display: 'none' }} onChange={handleUploadCorrectedFile} />
-                                </div>
+
+                                    {downloaded && (
+                                        <div className="upload-group">
+                                            <button className="btn btn-inline" onClick={() => correctedFileInputRef.current?.click()} disabled={uploadingCorrected}>
+                                                {uploadingCorrected ? 'Processing...' : 'Upload Corrected File'}
+                                            </button>
+                                            <input type="file" accept=".xlsx" ref={correctedFileInputRef} style={{ display: 'none' }} onChange={handleUploadCorrectedFile} />
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <button className="btn btn-secondary" onClick={handleDownloadCleanedFile}>
+                                    Download Cleaned File
+                                </button>
                             )}
                         </div>
 
-                        {/* This message now disappears after 5 seconds */}
+                        {/* The message disappears after 5 seconds */}
                         {showDownloadMessage && (
                             <p className="status-note success">
                                 Workbook downloaded.
                             </p>
                         )}
 
-                        <p className="mapping-note">Showing first 5 of {totalRows} rows. Rows highlighted in red have issues.</p>
+                        <p className="mapping-note">Showing first 5 of {totalRows} rows.{flaggedRows.size > 0 ? ' Rows highlighted in red have issues.' : ''}</p>
 
                         <div className="table-wrapper">
                             <table>
@@ -193,8 +211,18 @@ function CleanPage( ) {
                             {/* {!cleanResult.can_proceed && (
                                 <p className="status-note error">Fix all issues before proceeding to analysis.</p>
                             )} */}
-                            <button className="btn btn-proceed" disabled={!cleanResult.can_proceed} onClick={() => navigate('/analysis', { state: { cleanResult, clientId, uploadResult: currentUpload } })}>
-                                Proceed to Analysis →
+                            <button
+                                className="btn btn-proceed"
+                                disabled={!cleanResult.can_proceed}
+                                onClick={() => {
+                                    const isLedgerFile = fileType === 'trial_balance' || fileType === 'general_ledger'
+                                    const targetRoute = isLedgerFile ? '/trial-balance' : '/analysis'
+                                    navigate(targetRoute, { state: { cleanResult, clientId, uploadResult: currentUpload, fileType } })
+                                }}
+                            >
+                                {(fileType === 'trial_balance' || fileType === 'general_ledger')
+                                    ? 'Proceed to Trial Balance Validation →'
+                                    : 'Proceed to Analysis →'}
                             </button>
                         </div>
                     </div>

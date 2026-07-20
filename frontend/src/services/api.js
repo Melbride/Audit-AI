@@ -211,6 +211,10 @@ export const standardizeValue = (formData) =>
         headers: { 'Content-Type': 'multipart/form-data' }
     })
 
+// Download a cleaned file
+export const downloadCleanedFile = (fileId, clientId, fileType) =>
+    `${API.defaults.baseURL}/cleaned-files/${fileId}/download?client_id=${encodeURIComponent(clientId)}&file_type=${encodeURIComponent(fileType)}`
+
 // Upload a corrected Excel file (downloaded, edited, and re-uploaded by the auditor)
 export const submitCorrectedExcel = (formData) =>
     API.post('/clean/submit-corrected-excel', formData, {

@@ -101,6 +101,38 @@
     letter-spacing: 0.3px;
 }
 
+.ratio-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.ratio-tile {
+    min-height: 86px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.ratio-label {
+    color: var(--text-soft);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.ratio-tile strong {
+    color: var(--primary);
+    font-size: 1.5rem;
+    line-height: 1.1;
+}
+
 /* Correction Toolbar and Action Controls */
 .correction-toolbar {
     display: flex;
@@ -239,4 +271,5 @@ tbody tr.row-flagged:nth-child(even) {
     .page { padding: 8px 12px; }
     .card-clean-body { padding: 12px !important; }
     .stats-grid { grid-template-columns: 1fr; gap: 8px; }
+    .ratio-grid { grid-template-columns: 1fr; gap: 8px; }
 }

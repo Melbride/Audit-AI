@@ -259,7 +259,36 @@ def init_db():
             UNIQUE KEY uq_cleaning_correction (file_id(64), client_id(64), file_type(64), row_index, column_name(191))
         )
     """)
-
+    # Cleaned files registry. Stores the final cleaned data for a file after the auditor has finished editing.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cleaned_files_registry (
+            id              INT AUTO_INCREMENT PRIMARY KEY,
+            file_id         VARCHAR(255) NOT NULL,
+            client_id       VARCHAR(255) NOT NULL,
+            file_type       VARCHAR(100) NOT NULL,
+            filename        VARCHAR(255),
+            cleaned_data    LONGTEXT NOT NULL,
+            total_issues    INT DEFAULT 0,
+            can_proceed     TINYINT(1) DEFAULT 0,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_cleaned_file (file_id, client_id, file_type)
+        )
+    """)
+    # Account mappings table to store confirmed account category classifications
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS account_mappings (
+            id  INT AUTO_INCREMENT PRIMARY KEY,
+            client_id  VARCHAR(255) NOT NULL,
+            file_type  VARCHAR(100) NOT NULL DEFAULT 'general',
+            account_name    VARCHAR(255) NOT NULL,
+            category        VARCHAR(255) NOT NULL,
+            warning_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
+            confirmed_by    VARCHAR(255),
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_account_mapping (client_id, file_type, account_name)
+        )
+    """)
     # Cleaning snapshots table. Stores the cleaned data exactly as it looked when the Excel was downloaded,
     # so a later re-uploaded corrected file can be compared against what the auditor started editing from.
     # Composite PK (file_id, client_id, file_type) means only one snapshot per file at a time — each new
@@ -318,6 +347,51 @@ def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: st
     conn.close()
 
 
+# Function to Save all the account mappings in the database 
+def save_account_mapping(client_id: str, file_type: str, accounts: list, confirmed_by: str = None):
+    """
+    Saves a confirmed category classifications and also deletes existing entries for this client)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM account_mappings WHERE client_id = %s AND file_type = %s",
+        (client_id, file_type)
+    )
+    for acc in accounts:
+        cursor.execute("""
+            INSERT INTO account_mappings
+                (client_id, file_type, account_name, category, warning_acknowledged, confirmed_by)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            client_id, file_type, acc["account_name"], acc["category"],
+            1 if acc.get("warning_acknowledged") else 0, confirmed_by
+        ))
+    conn.commit()
+    conn.close()
+    
+# Function to retrieve saved account mappings for a client and file type
+def get_account_mapping(client_id: str, file_type: str = "general") -> dict:
+    """
+    Retrieve saved account mappings for a client and file type.
+    Returns {account_name: {"category": ..., "warning_acknowledged": bool}}.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT account_name, category, warning_acknowledged
+        FROM account_mappings
+        WHERE client_id = %s AND file_type = %s
+    """, (client_id, file_type))
+    rows = cursor.fetchall()
+    conn.close()
+    return {
+        row["account_name"]: {
+            "category": row["category"],
+            "warning_acknowledged": bool(row["warning_acknowledged"]),
+        }
+        for row in rows
+    }
 # Save a schema fingerprint, keyed by client + fingerprint + REAL file_type category.
 # ON DUPLICATE KEY UPDATE id = id is intentional, we only want to record that a fingerprint was
 # seen, not overwrite it with a newer timestamp on repeated uploads of the same schema.
@@ -568,3 +642,70 @@ def get_cleaning_snapshot(file_id: str, client_id: str, file_type: str):
         return None
     finally:
         conn.close()
+
+# Save the final cleaned version of a file to the cleaned_files_registry table.
+def save_cleaned_registry(file_id: str, client_id: str, file_type: str, cleaned_df, report: dict, filename: str = None):
+    """
+    Saves (or overwrites) the current cleaned version of a file. Called every
+    time cleaning finishes, from inside run_cleaning_cycle, so it always
+    reflects the latest state regardless of which correction path was used.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cleaned_json = json.dumps(cleaned_df.fillna("").astype(str).to_dict(orient="records"))
+    total_issues = report.get("total_issues", 0)
+    can_proceed = 1 if report.get("can_proceed", False) else 0
+
+    cursor.execute("""
+        INSERT INTO cleaned_files_registry
+            (file_id, client_id, file_type, filename, cleaned_data, total_issues, can_proceed)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            cleaned_data = VALUES(cleaned_data),
+            total_issues = VALUES(total_issues),
+            can_proceed = VALUES(can_proceed),
+            filename = COALESCE(VALUES(filename), filename),
+            updated_at = CURRENT_TIMESTAMP
+    """, (file_id, client_id, file_type, filename, cleaned_json, total_issues, can_proceed))
+    conn.commit()
+    conn.close()
+
+# Retrieve a list of all files that have a cleaned version saved for a client, most recently updated first.
+def get_cleaned_files_for_client(client_id: str) -> list:
+    """
+    Returns every file that has a cleaned version saved for this client,
+    most recently updated first. Does not include the full cleaned_data
+    (too large for a list view) — use get_cleaned_file_data for that.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT file_id, client_id, file_type, filename, total_issues, can_proceed, updated_at
+        FROM cleaned_files_registry
+        WHERE client_id = %s
+        ORDER BY updated_at DESC
+    """, (client_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+# Retrieve the full cleaned data for a specific file, or None if no cleaned version exists.
+def get_cleaned_file_data(file_id: str, client_id: str, file_type: str):
+    """
+    Returns the full cleaned data (as a list of row dicts) for one specific
+    file, or None if no cleaned version has been saved for it yet.
+    """
+    import json
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT filename, cleaned_data, total_issues, can_proceed, updated_at
+        FROM cleaned_files_registry
+        WHERE file_id = %s AND client_id = %s AND file_type = %s
+    """, (file_id, client_id, file_type))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    row["cleaned_data"] = json.loads(row["cleaned_data"])
+    return row

@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { getClients, createClient, updateClient, deleteClient } from "../services/api";
 import "../styles/Clients.css";
 
 // Clients page: lists all client records and (for authorized roles)
 // supports creating, editing, and deleting clients via a shared modal form.
 export default function Clients({ user }) {
+  const navigate = useNavigate();
   const [clients, setClients]         = useState([]); // client list shown in the table
   const [loading, setLoading]         = useState(true); // true while clients are being fetched
   const [showModal, setShowModal]     = useState(false); // controls visibility of the add/edit modal
@@ -144,6 +146,8 @@ export default function Clients({ user }) {
                         <button className="cl-btn-delete" onClick={() => handleDelete(c)}>Delete</button>
                       </>
                     )}
+                    <button className="cl-btn-view" onClick={() => navigate(`/clients/${c.client_id}`)}>View</button> 
+                    
                   </td>
                 </tr>
               ))}

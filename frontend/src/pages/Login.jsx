@@ -69,14 +69,7 @@ export default function Login({ onLogin }) {
     setError("");
     try {
       const res = await requestPasswordReset(resetEmail);
-      const data = res.data;
-      if (data.token) {
-        setResetToken(data.token);
-        setMessage("Token generated. Enter it below with your new password.");
-        setView("reset");
-      } else {
-        setError(data.detail || "Email not found");
-      }
+      setMessage(res.data.message || "Reset link sent. Check your email.");
     } catch (err) {
       setError(err.response?.data?.detail || "Could not connect to server.");
     }
@@ -149,12 +142,9 @@ export default function Login({ onLogin }) {
             <span style={{ fontSize: "20px", fontWeight: "700", color: colors.primary }}>Audit AI</span>
           </div>
 
-          {/* Shared error/success banners, shown above whichever form is active */}
+          {/* Shared error banner */}
           {error && (
             <div style={{ background: "#fdecea", border: `1px solid ${colors.danger}`, color: colors.danger, padding: "12px 16px", borderRadius: "8px", fontSize: "13px", marginBottom: "20px" }}>{error}</div>
-          )}
-          {message && (
-            <div style={{ background: "#eafaf1", border: `1px solid ${colors.success}`, color: colors.success, padding: "12px 16px", borderRadius: "8px", fontSize: "13px", marginBottom: "20px" }}>{message}</div>
           )}
 
           {/* LOGIN FORM */}
@@ -183,19 +173,30 @@ export default function Login({ onLogin }) {
           {/* FORGOT PASSWORD FORM — requests a reset token by email */}
           {view === "forgot" && (
             <>
-              <h3 style={{ fontSize: "24px", fontWeight: "700", color: colors.primary, marginBottom: "8px" }}>Reset your password</h3>
-              <p style={{ fontSize: "14px", color: "#7f8c8d", marginBottom: "32px" }}>Enter your email to receive a reset token</p>
-              <form onSubmit={handleForgot}>
-                <div style={{ marginBottom: "24px" }}>
-                  <label style={{ ...labelStyle, color: colors.primary }}>Email Address</label>
-                  <input type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="you@auditai.com" required style={{ ...inputStyle, color: colors.primary }} />
-                </div>
-                <button type="submit" disabled={loading} style={btnStyle}>{loading ? "Sending..." : "Send Reset Token"}</button>
-                {/* Back to login without submitting anything */}
-                <div style={{ textAlign: "center" }}>
-                  <span onClick={() => { setView("login"); setError(""); }} style={{ fontSize: "13px", color: colors.secondary, cursor: "pointer" }}>← Back to login</span>
-                </div>
-              </form>
+              {message ? (
+                <>
+                  <h3 style={{ fontSize: "24px", fontWeight: "700", color: colors.primary, marginBottom: "8px" }}>Check your email</h3>
+                  <p style={{ fontSize: "14px", color: "#7f8c8d", marginBottom: "32px" }}>We sent a password reset link to <strong>{resetEmail}</strong>. Click the link in the email to reset your password.</p>
+                  <div style={{ textAlign: "center" }}>
+                    <span onClick={() => { setView("login"); setMessage(""); setError(""); }} style={{ fontSize: "13px", color: colors.secondary, cursor: "pointer" }}>← Back to login</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h3 style={{ fontSize: "24px", fontWeight: "700", color: colors.primary, marginBottom: "8px" }}>Reset your password</h3>
+                  <p style={{ fontSize: "14px", color: "#7f8c8d", marginBottom: "32px" }}>Enter your email to receive a reset link</p>
+                  <form onSubmit={handleForgot}>
+                    <div style={{ marginBottom: "24px" }}>
+                      <label style={{ ...labelStyle, color: colors.primary }}>Email Address</label>
+                      <input type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="you@auditai.com" required style={{ ...inputStyle, color: colors.primary }} />
+                    </div>
+                    <button type="submit" disabled={loading} style={btnStyle}>{loading ? "Sending..." : "Send Reset Link"}</button>
+                    <div style={{ textAlign: "center" }}>
+                      <span onClick={() => { setView("login"); setError(""); }} style={{ fontSize: "13px", color: colors.secondary, cursor: "pointer" }}>← Back to login</span>
+                    </div>
+                  </form>
+                </>
+              )}
             </>
           )}
 
