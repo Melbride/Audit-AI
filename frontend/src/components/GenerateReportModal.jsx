@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { getClients, getClientFiles, getEngagements, generateReport } from "../services/api";
+import "../styles/GenerateReportModal.css";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -112,31 +113,20 @@ export default function GenerateReportModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div
-        className="modal-panel"
-        style={{ maxWidth: 480 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[15px] font-semibold text-slate-800">Generate Report</h2>
-          <button
-            className="text-slate-400 hover:text-slate-700 text-[18px] leading-none"
-            onClick={onClose}
-            aria-label="Close"
-          >
+      <div className="modal-panel" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-panel-header">
+          <h2>Generate Report</h2>
+          <button className="modal-close-btn" onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
 
-        {error && (
-          <div className="alert-message alert-error mb-3">{error}</div>
-        )}
+        {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <label className="text-[12px] font-medium text-slate-600">
+        <form onSubmit={handleSubmit} className="modal-form">
+          <label>
             Client
             <select
-              className="w-full mt-1"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               disabled={lockClientEngagement}
@@ -151,10 +141,9 @@ export default function GenerateReportModal({
             </select>
           </label>
 
-          <label className="text-[12px] font-medium text-slate-600">
+          <label>
             Engagement
             <select
-              className="w-full mt-1"
               value={engagementId}
               onChange={(e) => setEngagementId(e.target.value)}
               disabled={!clientId || lockClientEngagement}
@@ -168,24 +157,19 @@ export default function GenerateReportModal({
               ))}
             </select>
             {clientId && !lockClientEngagement && clientEngagements.length === 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">
-                No engagements found for this client yet.
-              </p>
+              <p className="modal-hint">No engagements found for this client yet.</p>
             )}
           </label>
 
-          <label className="text-[12px] font-medium text-slate-600">
+          <label>
             Uploaded file
             <select
-              className="w-full mt-1"
               value={fileId}
               onChange={(e) => setFileId(e.target.value)}
               disabled={!clientId || loadingFiles}
               required
             >
-              <option value="">
-                {loadingFiles ? "Loading files…" : "Select a file…"}
-              </option>
+              <option value="">{loadingFiles ? "Loading files…" : "Select a file…"}</option>
               {files.map((f) => (
                 <option key={f.file_id} value={f.file_id}>
                   {f.filename || f.file_id}
@@ -193,19 +177,13 @@ export default function GenerateReportModal({
               ))}
             </select>
             {clientId && !loadingFiles && files.length === 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">
-                No files uploaded for this client yet.
-              </p>
+              <p className="modal-hint">No files uploaded for this client yet.</p>
             )}
           </label>
 
-          <label className="text-[12px] font-medium text-slate-600">
+          <label>
             Report type
-            <select
-              className="w-full mt-1"
-              value={reportType}
-              onChange={(e) => setReportType(e.target.value)}
-            >
+            <select value={reportType} onChange={(e) => setReportType(e.target.value)}>
               <option value="monthly">Monthly</option>
               <option value="yearly">Yearly</option>
               <option value="custom">Custom range</option>
@@ -213,14 +191,10 @@ export default function GenerateReportModal({
           </label>
 
           {reportType === "monthly" && (
-            <div className="flex gap-2">
-              <label className="text-[12px] font-medium text-slate-600 flex-1">
+            <div className="modal-form-row">
+              <label>
                 Month
-                <select
-                  className="w-full mt-1"
-                  value={month}
-                  onChange={(e) => setMonth(e.target.value)}
-                >
+                <select value={month} onChange={(e) => setMonth(e.target.value)}>
                   {MONTHS.map((m, i) => (
                     <option key={m} value={i + 1}>
                       {m}
@@ -228,64 +202,39 @@ export default function GenerateReportModal({
                   ))}
                 </select>
               </label>
-              <label className="text-[12px] font-medium text-slate-600 flex-1">
+              <label>
                 Year
-                <input
-                  type="number"
-                  className="w-full mt-1"
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                />
+                <input type="number" value={year} onChange={(e) => setYear(e.target.value)} />
               </label>
             </div>
           )}
 
           {reportType === "yearly" && (
-            <label className="text-[12px] font-medium text-slate-600">
+            <label>
               Year
-              <input
-                type="number"
-                className="w-full mt-1"
-                value={year}
-                onChange={(e) => setYear(e.target.value)}
-              />
+              <input type="number" value={year} onChange={(e) => setYear(e.target.value)} />
             </label>
           )}
 
           {reportType === "custom" && (
-            <div className="flex gap-2">
-              <label className="text-[12px] font-medium text-slate-600 flex-1">
+            <div className="modal-form-row">
+              <label>
                 Start date
-                <input
-                  type="date"
-                  className="w-full mt-1"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
               </label>
-              <label className="text-[12px] font-medium text-slate-600 flex-1">
+              <label>
                 End date
-                <input
-                  type="date"
-                  className="w-full mt-1"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
               </label>
             </div>
           )}
 
-          <label className="text-[12px] font-medium text-slate-600">
+          <label>
             Commentary (optional, can edit after generating)
-            <textarea
-              className="w-full mt-1"
-              rows={3}
-              value={commentary}
-              onChange={(e) => setCommentary(e.target.value)}
-            />
+            <textarea rows={3} value={commentary} onChange={(e) => setCommentary(e.target.value)} />
           </label>
 
-          <div className="flex justify-end gap-2 mt-2">
+          <div className="modal-form-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancel
             </button>

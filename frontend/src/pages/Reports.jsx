@@ -1,16 +1,10 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FileText, Clock, Plus } from "../components/Icons";
+import { FileText, Plus } from "../components/Icons";
 import { getReports } from "../services/api";
 import GenerateReportModal from "../components/GenerateReportModal";
-
-const STATUS_STYLES = {
-  draft: "bg-slate-100 text-slate-600",
-  in_review: "bg-slate-100 text-slate-600",
-  changes_requested: "bg-amber-50 text-amber-700",
-  approved: "bg-emerald-50 text-emerald-700",
-  exported: "bg-emerald-50 text-emerald-700",
-};
+import "../styles/ReportReview.css"; // reuses .badge / .badge-* status styles
+import "../styles/Reports.css";
 
 const STATUS_LABELS = {
   draft: "Draft",
@@ -49,54 +43,48 @@ export default function Reports({ user }) {
   };
 
   if (loading) {
-    return <div className="p-6 text-[13px] text-slate-500">Loading reports…</div>;
+    return <div className="page"><p className="text-muted">Loading reports…</p></div>;
   }
   if (error) {
-    return <div className="p-6 text-[13px] text-red-600">Couldn't load reports: {error}</div>;
+    return <div className="page"><div className="error">Couldn't load reports: {error}</div></div>;
   }
 
   return (
-    <div className="p-6" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-[18px] font-semibold text-slate-800">Reports</h1>
-        <button
-          className="btn btn-primary flex items-center gap-1.5"
-          onClick={() => setShowGenerateModal(true)}
-        >
-          <Plus size={14} />
-          Generate Report
-        </button>
+    <div className="page">
+      <div className="header">
+        <div className="logo" style={{ justifyContent: "space-between", width: "100%" }}>
+          <span>Reports</span>
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowGenerateModal(true)}
+          >
+            <Plus size={14} />
+            Generate Report
+          </button>
+        </div>
+        <p className="subtitle">Every generated report across all clients, most recent first.</p>
       </div>
 
       {reports.length === 0 ? (
-        <p className="text-[13px] text-slate-500">No reports yet.</p>
+        <p className="text-muted">No reports have been generated yet.</p>
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+        <div className="table-wrapper">
           {reports.map((r) => (
-            <Link
-              key={r.id}
-              to={`/reports/${r.id}`}
-              className="flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <FileText size={16} className="text-slate-400" />
+            <Link key={r.id} to={`/reports/${r.id}`} className="report-row">
+              <div className="report-row-main">
+                <FileText size={16} className="report-row-icon" />
                 <div>
-                  <p className="text-[13px] font-medium text-slate-800">
+                  <p className="report-row-title">
                     {r.type === "custom" ? "Custom range report" : `${r.type[0].toUpperCase()}${r.type.slice(1)} report`}
                   </p>
-                  <p className="text-[12px] text-slate-400 mt-0.5">
+                  <p className="report-row-meta">
                     {r.period_start} – {r.period_end}
                     {r.created_by_name ? ` · ${r.created_by_name}` : ""}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[11px] text-slate-400">v{r.version_number ?? "—"}</span>
-                <span
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                    STATUS_STYLES[r.status] || "bg-slate-100 text-slate-600"
-                  }`}
-                >
+              <div className="report-row-status">
+                <span className={`badge badge-${r.status}`}>
                   {STATUS_LABELS[r.status] || r.status}
                 </span>
               </div>

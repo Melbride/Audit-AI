@@ -194,7 +194,7 @@ export default function ReportReview({ reportId, user }) {
         showAlert("success", "Report approved successfully and locked.");
       } else {
         await requestReportChanges(reportId, reqData);
-        showAlert("success", "Changes requested. A new draft version has been created.");
+        showAlert("success", "Changes requested. A new draft Reporthas been created.");
       }
 
       setActionType(null);
@@ -269,14 +269,12 @@ const handleExport = async (format) => {
               : `${report.type[0].toUpperCase()}${report.type.slice(1)} Audit Report`}
           </h1>
           <div className="report-meta-tags">
-            <span>Period: {report.period_start} to {report.period_end}</span>
-            <span>•</span>
-            <span>Version: v{version?.version_number}</span>
-            <span>•</span>
-            <span className={`badge badge-${report.status}`}>
-              {report.status?.replace("_", " ")}
-            </span>
-          </div>
+  <span>Period: {report.period_start} to {report.period_end}</span>
+  <span>•</span>
+  <span className={`badge badge-${report.status}`}>
+    {report.status?.replace("_", " ")}
+  </span>
+</div>
         </div>
       </div>
 
@@ -539,7 +537,7 @@ const handleExport = async (format) => {
           <div className="action-box">
             <h3 className="font-semibold text-slate-800 text-[14px] mb-3 flex items-center gap-1.5">
               <Clock size={15} className="text-slate-400" />
-              Version History
+              Report History
             </h3>
             <div className="timeline-list">
               {history?.map((h, i) => (
@@ -549,7 +547,7 @@ const handleExport = async (format) => {
                 >
                   <div className="timeline-dot"></div>
                   <div className="timeline-item-header">
-                    <span className="timeline-version-name">Version v{h.version_number}</span>
+                   <span className="timeline-version-name">Report {h.version_number}</span>
                     <span className="timeline-date">{formatDate(h.created_at)}</span>
                   </div>
                   <div className="timeline-details">
