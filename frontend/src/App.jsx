@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-// import ClientDetailsPage from './pages/ClientDetailsPage'
-// AI pipeline pages 
+// AI pipeline pages
 import UploadPage from './pages/UploadPage'
 import MappingPage from './pages/MappingPage'
 import CleanPage from './pages/CleanPage'
@@ -9,7 +8,8 @@ import AnalysisPage from './pages/AnalysisPage'
 import CorrectedResultsPage from './pages/CorrectedResultsPage'
 import TrialBalancePage from './pages/TrialBalancePage'
 import AccountMappingPage from './pages/AccountMappingPage'
-// App/management pages 
+
+// App/management pages
 import Login from './pages/Login'
 import ResetPassword from './pages/password_reset'
 import PasswordResetDone from './pages/password_reset_done'
@@ -17,12 +17,15 @@ import SetNewPassword from './pages/password_reset_confirm'
 import PasswordResetComplete from './pages/password_reset_complete'
 import Dashboard from './pages/Dashboard'
 import Users from './pages/Users'
+import LoginManagement from './pages/LoginManagement'
 import Clients from './pages/Clients'
 import Engagements from './pages/Engagements'
 import EngagementDetail from './pages/EngagementDetail'
 import Notifications from './pages/Notifications'
 import Submissions from './pages/Submissions'
 import AllFiles from './pages/AllFiles'
+import Reports from './pages/Reports'
+import ReportDetail from './pages/ReportDetail'
 import Layout from './pages/Layout'
 import ClientDetailsPage from './pages/ClientDetailsPage'
 import './App.css'
@@ -111,7 +114,18 @@ function App() {
           element={
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
-                <AnalysisPage />
+                <AnalysisPage user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        {/* Analysis scoped to a specific engagement, linked from EngagementDetail */}
+        <Route
+          path="/analysis/:engagementId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <AnalysisPage user={user} />
               </Layout>
             </RequireAuth>
           }
@@ -188,12 +202,53 @@ function App() {
             </RequireAuth>
           }
         />
+        {/* Reports (Month 3) */}
+        <Route
+          path="/reports"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Reports user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/reports/:reportId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <ReportDetail user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
         <Route
           path="/users"
           element={
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
                 <Users user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/login-management"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <LoginManagement user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/users/:userId/login-management"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <LoginManagement user={user} />
               </Layout>
             </RequireAuth>
           }

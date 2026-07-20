@@ -221,4 +221,75 @@ export const submitCorrectedExcel = (formData) =>
         headers: { 'Content-Type': 'multipart/form-data' }
     })
 
+// ===============================
+// REPORTS (Month 3) — versioned reports/report_versions/report_approvals
+// system, served from /api/reports (see report_routes.py)
+// ===============================
+
+// Generate a new report from a cleaned file (creates the report + version 1)
+// data = { client_id, file_id, file_type, report_type, year, month, start_date, end_date, commentary, generated_by }
+export const generateReport = (data) =>
+    API.post('/api/reports/generate', data)
+
+// List reports, optionally filtered to one client and/or one engagement
+export const getReports = (clientId, engagementId) => {
+    const params = {}
+    if (clientId) params.client_id = clientId
+    if (engagementId) params.engagement_id = engagementId
+    return API.get('/api/reports', Object.keys(params).length ? { params } : undefined)
+}
+
+// Fetch a report's current version, edit history, and full detail
+export const getReport = (reportId) =>
+    API.get(`/api/reports/${reportId}`)
+
+// data = { commentary, edited_by }
+export const updateReportCommentary = (reportId, data) =>
+    API.patch(`/api/reports/${reportId}/commentary`, data)
+
+// data = { insights: [{ id, severity, text }], edited_by }
+export const updateReportInsights = (reportId, data) =>
+    API.patch(`/api/reports/${reportId}/insights`, data)
+
+// Approve the current version. Restricted to Engagement Partner (backend-enforced).
+// data = { notes }
+export const approveReport = (reportId, data) =>
+    API.post(`/api/reports/${reportId}/approve`, data)
+
+// Send the current version back for revision. Restricted to Engagement Partner.
+// data = { notes }
+export const requestReportChanges = (reportId, data) =>
+    API.post(`/api/reports/${reportId}/request-changes`, data)
+
+// Generate a PDF/Excel/CSV export of a report's current version.
+// Returns { export_id, format, message } — pass export_id to
+// getExportDownloadUrl() to build the actual download link.
+export const exportReport = (reportId, format) =>
+    API.post(`/api/reports/${reportId}/export`, { format })
+
+// Builds the direct download URL for a previously generated export.
+// Not an axios call — this endpoint is intentionally unauthenticated
+// (window.open() can't carry the Bearer token), so it's just a URL string.
+export const getExportDownloadUrl = (exportId) =>
+    `${API.defaults.baseURL}/api/reports/exports/${exportId}/download`
+
+// ===============================
+// LOGIN MANAGEMENT
+// ===============================
+
+// Get login history for a user
+export const getUserLoginHistory = (userId) =>
+    API.get(`/users/${userId}/login-history`);
+
+// Reset a user's password
+export const resetUserPassword = (userId, newPassword) =>
+    API.put(`/users/${userId}/reset-password`, {
+        new_password: newPassword,
+    });
+
+// Lock or unlock a user's account
+export const setUserLoginLock = (userId, locked) =>
+    API.put(`/users/${userId}/login-lock`, {
+        locked,
+    });
 export default API

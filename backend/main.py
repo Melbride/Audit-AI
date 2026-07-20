@@ -34,6 +34,9 @@ from dotenv import load_dotenv
 # AI detection helpers, used to identify columns and suggest file types
 from detector import detect_columns_with_llm, build_detection_result, suggest_file_type
 
+# Shared JWT auth dependency (decodes token, restricts routes by role)
+from auth import require_role
+
 # Database helper functions for mappings, uploads, corrections, snapshots, and acknowledgments
 from database import (
     init_db, get_db, save_mapping, get_mapping, save_upload, get_uploads,
@@ -82,6 +85,14 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     init_db()
+
+# Report review/approval workflow (Month 3): /api/reports/...
+from report_routes import router as report_router
+app.include_router(report_router)
+
+# Report export system (Month 3): /api/reports/{id}/export, /api/reports/exports/{id}/download
+from report_exports import router as report_export_router
+app.include_router(report_export_router)
 
 # Auth configuration: secret key, hashing algorithm, token lifetime, and password hashing context
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -484,6 +495,93 @@ def build_financial_analysis_context(cleaned_df: pd.DataFrame, mapping: dict, cl
     })
     return context
 
+# --- Report Generator helpers -----------------------------------------------
+#
+# The Report Generator (Month 3) reuses the same cleaned dataframe and mapping
+# that the Financial Engine and AI Insights Engine already work with (Month 2),
+# it just scopes them to a specific period first.
+
+# Find the original column name in `mapping` that was mapped to a given
+# standard field (e.g. "date"). Returns None if nothing is mapped to it.
+def resolve_mapped_column(mapping: dict, standard_field: str) -> Optional[str]:
+    for original_col, info in mapping.items():
+        if isinstance(info, dict) and info.get("mapped_to") == standard_field:
+            return original_col
+    return None
+
+# Parse a single date value the same flexible way validate_field_types_against_data
+# does elsewhere in this file, so period filtering agrees with the cleaning report.
+def _parse_flexible_date(value):
+    val_str = str(value).strip()
+    if not val_str:
+        return pd.NaT
+    dayfirst = not (len(val_str) >= 10 and val_str[4] == '-' and val_str[7] == '-')
+    return pd.to_datetime(val_str, dayfirst=dayfirst, errors='coerce')
+
+# Work out the [period_start, period_end] date bounds and a human-readable
+# label from a ReportGenerateRequest's report_type and the fields relevant to it.
+def resolve_report_period(req: "ReportGenerateRequest"):
+    if req.report_type == "monthly":
+        if not req.year or not req.month:
+            raise HTTPException(status_code=400, detail="Monthly reports require both 'year' and 'month'.")
+        if not (1 <= req.month <= 12):
+            raise HTTPException(status_code=400, detail="'month' must be between 1 and 12.")
+        period_start = pd.Timestamp(year=req.year, month=req.month, day=1)
+        period_end = period_start + pd.offsets.MonthEnd(0)
+        period_label = period_start.strftime("%B %Y")
+
+    elif req.report_type == "yearly":
+        if not req.year:
+            raise HTTPException(status_code=400, detail="Yearly reports require 'year'.")
+        period_start = pd.Timestamp(year=req.year, month=1, day=1)
+        period_end = pd.Timestamp(year=req.year, month=12, day=31)
+        period_label = str(req.year)
+
+    else:  # custom
+        if not req.start_date or not req.end_date:
+            raise HTTPException(status_code=400, detail="Custom reports require both 'start_date' and 'end_date'.")
+        period_start = pd.to_datetime(req.start_date, errors="coerce")
+        period_end = pd.to_datetime(req.end_date, errors="coerce")
+        if pd.isna(period_start) or pd.isna(period_end):
+            raise HTTPException(status_code=400, detail="'start_date' and 'end_date' must be valid dates (YYYY-MM-DD).")
+        if period_start > period_end:
+            raise HTTPException(status_code=400, detail="'start_date' must be on or before 'end_date'.")
+        period_label = f"{period_start.strftime('%d %b %Y')} \u2013 {period_end.strftime('%d %b %Y')}"
+
+    return period_start, period_end, period_label
+
+# Filter a cleaned dataframe down to rows whose mapped date column falls
+# within [period_start, period_end]. Raises if there's no date column mapped,
+# or if the period contains no rows at all, since a report with silently zero
+# data is worse than an explicit error.
+def filter_dataframe_by_period(df: pd.DataFrame, mapping: dict, period_start, period_end) -> pd.DataFrame:
+    date_col = resolve_mapped_column(mapping, "date")
+    if not date_col or date_col not in df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail="No column is mapped to 'date' for this file, so reports cannot be scoped to a period. "
+                   "Please map a date column first."
+        )
+    parsed_dates = df[date_col].apply(_parse_flexible_date)
+    mask = (parsed_dates >= period_start) & (parsed_dates <= period_end)
+    filtered = df.loc[mask]
+    if filtered.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No transactions fall within the selected period. Try a different date range."
+        )
+    return filtered
+
+# Describe the charts the frontend dashboard (Month 2) should render for this
+# report, without pre-rendering images here — actual PDF/image chart embedding
+# belongs to the Export System, built separately.
+def build_chart_specs(breakdowns: dict, monthly_trend: list) -> list:
+    return [
+        {"type": "profit_vs_loss", "title": "Profit vs Loss", "source": "financial_summary"},
+        {"type": "revenue_line", "title": "Revenue Trend", "source": "monthly_trend"},
+        {"type": "expense_pie", "title": "Expense Breakdown", "source": "financial_summary.expenses"},
+    ]
+
 # Pydantic model for a client record
 class Client(BaseModel):
     company_name: str
@@ -579,6 +677,24 @@ class Notification(BaseModel):
     user_id: int
     message: str
     type: Optional[str] = "engagement_alert"
+
+# Pydantic model for requesting a generated report. Exactly which of
+# year/month/start_date/end_date is required depends on report_type:
+#   monthly -> year + month
+#   yearly  -> year
+#   custom  -> start_date + end_date (YYYY-MM-DD)
+class ReportGenerateRequest(BaseModel):
+    client_id: int
+    engagement_id: int
+    file_id: str
+    file_type: Optional[str] = "general"
+    report_type: Literal["monthly", "yearly", "custom"]
+    year: Optional[int] = None
+    month: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    commentary: Optional[str] = ""
+    generated_by: Optional[int] = None
 
 # Simple health check endpoint
 @app.get("/")
@@ -1471,6 +1587,194 @@ async def generate_financial_statements_endpoint(
         "financial_ratios": result.get("financial_ratios"),
     }
     
+
+# --- Report Generator (Month 3) ---------------------------------------------
+#
+# Turns the Financial Engine + AI Insights Engine output (Month 2) into a
+# saved, period-scoped report: monthly, yearly, or a custom date range.
+# Writes into the versioned schema used by report_routes.py (reports +
+# report_versions), so the report immediately has a v1 that can go through
+# the review/approval workflow (see report_routes.py).
+#
+# Requires the migration in report_routes.py's schema (reports, report_versions,
+# report_approvals, report_exports) PLUS a client_id column on reports:
+#   ALTER TABLE reports ADD COLUMN client_id INT NOT NULL AFTER id;
+#
+# financial_summary/ai_insights/commentary map directly to report_versions
+# columns. monthly_trend and anomalies don't have dedicated columns in the
+# new schema, so they're folded into chart_refs alongside chart_specs —
+# revisit if you want them broken out separately later.
+@app.post("/api/reports/generate")
+def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
+    mapping = get_mapping(req.client_id, req.file_type)
+    if not mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="No saved mapping found for this client. Please complete column mapping first."
+        )
+
+    cleaned_df, cleaning_report = run_cleaning_cycle(req.file_id, req.client_id, req.file_type, mapping)
+    if not cleaning_report.get("can_proceed", False):
+        raise HTTPException(
+            status_code=400,
+            detail="This file still has unresolved issues. Please finish cleaning before generating a report."
+        )
+
+    period_start, period_end, period_label = resolve_report_period(req)
+    period_df = filter_dataframe_by_period(cleaned_df, mapping, period_start, period_end)
+
+    breakdowns = calculate_breakdowns(period_df, mapping)
+    monthly_trend = calculate_monthly_trend(period_df, mapping)
+    anomalies = detect_anomalies(monthly_trend)
+    try:
+        ai_insights = generate_ai_insights(breakdowns, monthly_trend, anomalies)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Insight generation failed: {str(e)}")
+
+    chart_specs = build_chart_specs(breakdowns, monthly_trend)
+
+    report_id = str(uuid.uuid4())
+    version_id = str(uuid.uuid4())
+
+    cursor = db.cursor()
+    cursor.execute(
+        """INSERT INTO reports
+           (id, client_id, engagement_id, file_id, type, period_start, period_end, status, current_version_id, created_by, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (
+            report_id, req.client_id, req.engagement_id, req.file_id, req.report_type,
+            period_start.date(), period_end.date(),
+            "draft", version_id, req.generated_by, datetime.utcnow(),
+        )
+    )
+    cursor.execute(
+        """INSERT INTO report_versions
+           (id, report_id, version_number, financial_summary, ai_insights,
+            commentary, chart_refs, generated_by, status, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (
+            version_id, report_id, 1,
+            json.dumps(breakdowns), json.dumps(ai_insights),
+            req.commentary or "",
+            json.dumps({"chart_specs": chart_specs, "monthly_trend": monthly_trend, "anomalies": anomalies}),
+            "ai", "draft", datetime.utcnow(),
+        )
+    )
+    db.commit()
+
+    return {
+        "report_id": report_id,
+        "client_id": req.client_id,
+        "engagement_id": req.engagement_id,
+        "report_type": req.report_type,
+        "period_label": period_label,
+        "period_start": period_start.date().isoformat(),
+        "period_end": period_end.date().isoformat(),
+        "financial_summary": breakdowns,
+        "monthly_trend": monthly_trend,
+        "ai_insights": ai_insights,
+        "anomalies": anomalies,
+        "chart_specs": chart_specs,
+        "commentary": req.commentary or "",
+        "message": "Report generated successfully."
+    }
+
+# NOTE: GET /reports/{id}, GET /clients/{id}/reports, PUT /reports/{id}/commentary,
+# and DELETE /reports/{id} moved to report_routes.py under /api/reports —
+# see GET/PATCH /api/reports/{report_id}[/commentary] and DELETE /api/reports/{report_id}.
+
+
+# --- Engagement status auto-progression helpers -----------------------------
+#
+# Status is DERIVED at read-time from real workflow data instead of being set
+# directly, so it can never drift out of sync (e.g. if a section gets
+# un-approved after review started, status correctly drops back down):
+#
+#   Planning      -> default, nothing has happened yet
+#   In Progress   -> at least one submission has left Draft / the Accountant stage
+#   Under Review  -> every section's LATEST submission is "Approved"
+#   Completed     -> engagement.sent_to_client_at has been set
+#
+# Requires a migration (run once):
+#   ALTER TABLE engagements ADD COLUMN sent_to_client_at DATETIME NULL;
+
+def fetch_engagement_progress(db, engagement_ids: list) -> dict:
+    """Batch-fetch the section/submission counts needed to derive status for
+    a list of engagement ids, in 3 queries total (not one per engagement)."""
+    if not engagement_ids:
+        return {}
+    placeholders = ",".join(["%s"] * len(engagement_ids))
+    progress = {
+        eid: {"total_sections": 0, "approved_sections": 0, "forwarded": False}
+        for eid in engagement_ids
+    }
+    cursor = db.cursor(dictionary=True)
+
+    # Total sections per engagement
+    cursor.execute(
+        f"SELECT engagement_id, COUNT(*) AS total FROM audit_sections "
+        f"WHERE engagement_id IN ({placeholders}) GROUP BY engagement_id",
+        tuple(engagement_ids)
+    )
+    for row in cursor.fetchall():
+        progress[row["engagement_id"]]["total_sections"] = row["total"]
+
+    # Sections whose most recent submission is "Approved" (MySQL 8+ window function)
+    cursor.execute(
+        f"""
+        SELECT engagement_id, COUNT(*) AS approved
+        FROM (
+            SELECT section_id, engagement_id, status,
+                   ROW_NUMBER() OVER (PARTITION BY section_id ORDER BY created_at DESC) AS rn
+            FROM submissions
+            WHERE engagement_id IN ({placeholders})
+        ) latest
+        WHERE rn = 1 AND status = 'Approved'
+        GROUP BY engagement_id
+        """,
+        tuple(engagement_ids)
+    )
+    for row in cursor.fetchall():
+        progress[row["engagement_id"]]["approved_sections"] = row["approved"]
+
+    # Engagements where at least one submission has moved past Draft/Accountant
+    cursor.execute(
+        f"""
+        SELECT DISTINCT engagement_id
+        FROM submissions
+        WHERE engagement_id IN ({placeholders})
+          AND (status != 'Draft' OR current_stage != 'Accountant')
+        """,
+        tuple(engagement_ids)
+    )
+    for row in cursor.fetchall():
+        progress[row["engagement_id"]]["forwarded"] = True
+
+    return progress
+
+
+def apply_display_status(engagement: dict, progress: dict) -> None:
+    """Mutates `engagement` in place, adding a `display_status` field derived
+    from its section/submission progress. `engagement` must include
+    `sent_to_client_at` (from a plain SELECT * on engagements)."""
+    total = progress.get("total_sections", 0)
+    approved = progress.get("approved_sections", 0)
+    forwarded = progress.get("forwarded", False)
+
+    if engagement.get("sent_to_client_at"):
+        status = "Completed"
+    elif total > 0 and approved == total:
+        status = "Under Review"
+    elif forwarded:
+        status = "In Progress"
+    else:
+        status = "Planning"
+
+    engagement["display_status"] = status
+    engagement["total_sections"] = total
+    engagement["approved_sections"] = approved
+
+
 # List all clients
 @app.get("/clients")
 def get_clients(db=Depends(get_db)):
@@ -1828,7 +2132,8 @@ def delete_mapping(mapping_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Column mapping deleted"}
 
-# List all engagements with their client's company name, most recent first
+# List all engagements with their client's company name, most recent first,
+# along with an auto-derived workflow status (see compute_engagement_status_fields)
 @app.get("/engagements")
 def get_engagements(db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1837,9 +2142,16 @@ def get_engagements(db=Depends(get_db)):
         LEFT JOIN clients c ON e.client_id = c.client_id
         ORDER BY e.created_at DESC
     """)
-    return cursor.fetchall()
+    engagements = cursor.fetchall()
+    if not engagements:
+        return engagements
+    engagement_ids = [row["engagement_id"] for row in engagements]
+    progress_by_id = fetch_engagement_progress(db, engagement_ids)
+    for row in engagements:
+        apply_display_status(row, progress_by_id.get(row["engagement_id"], {}))
+    return engagements
 
-# Get a single engagement by id, with its client's company name
+# Get a single engagement by id, with its client's company name and derived status
 @app.get("/engagements/{engagement_id}")
 def get_engagement(engagement_id: int, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -1851,6 +2163,8 @@ def get_engagement(engagement_id: int, db=Depends(get_db)):
     engagement = cursor.fetchone()
     if not engagement:
         raise HTTPException(status_code=404, detail="Engagement not found")
+    progress_by_id = fetch_engagement_progress(db, [engagement_id])
+    apply_display_status(engagement, progress_by_id.get(engagement_id, {}))
     return engagement
 
 # Create a new engagement and automatically create its four default audit sections
@@ -1880,6 +2194,39 @@ def update_engagement(engagement_id: int, e: Engagement, db=Depends(get_db)):
     )
     db.commit()
     return {"message": "Engagement updated"}
+
+# Mark an engagement as sent to the client. Only allowed once every section's
+# latest submission is Approved — i.e. the derived status is "Under Review".
+@app.put("/engagements/{engagement_id}/send-to-client")
+def send_engagement_to_client(
+    engagement_id: int,
+    db=Depends(get_db),
+    current_user: dict = Depends(require_role("Engagement Partner")),
+):
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM engagements WHERE engagement_id = %s", (engagement_id,))
+    engagement = cursor.fetchone()
+    if not engagement:
+        raise HTTPException(status_code=404, detail="Engagement not found")
+
+    progress_by_id = fetch_engagement_progress(db, [engagement_id])
+    apply_display_status(engagement, progress_by_id.get(engagement_id, {}))
+    if engagement["display_status"] != "Under Review":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot send to client until every section's latest submission is "
+                f"Approved (current status: {engagement['display_status']})."
+            )
+        )
+
+    cursor2 = db.cursor()
+    cursor2.execute(
+        "UPDATE engagements SET sent_to_client_at = NOW() WHERE engagement_id = %s",
+        (engagement_id,)
+    )
+    db.commit()
+    return {"message": "Engagement marked as sent to client", "display_status": "Completed"}
 
 # Delete an engagement along with its audit sections and team assignments
 @app.delete("/engagements/{engagement_id}")

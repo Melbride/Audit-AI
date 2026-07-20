@@ -3,23 +3,21 @@ import { useNavigate } from "react-router-dom";
 import { getClients, createClient, updateClient, deleteClient } from "../services/api";
 import "../styles/Clients.css";
 
-// Clients page: lists all client records and (for authorized roles)
-// supports creating, editing, and deleting clients via a shared modal form.
 export default function Clients({ user }) {
   const navigate = useNavigate();
-  const [clients, setClients]         = useState([]); // client list shown in the table
-  const [loading, setLoading]         = useState(true); // true while clients are being fetched
-  const [showModal, setShowModal]     = useState(false); // controls visibility of the add/edit modal
-  const [editingClient, setEditingClient] = useState(null); // the client being edited, or null when creating
-
-  // Form fields for both create and edit flows (same modal/form is reused for both)
+  const [clients, setClients]             = useState([]);
+  const [loading, setLoading]             = useState(true);
+  const [showModal, setShowModal]         = useState(false);
+  const [editingClient, setEditingClient] = useState(null);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState({
     company_name: "", contact_person: "", email: "",
     phone: "", industry: "", address: "", status: "Active",
+    kra_pin: false, kra_pin_number: "",
   });
-  const [saving, setSaving] = useState(false); // true while a save (create/update) request is in flight
+  const [saving, setSaving] = useState(false);
 
-  // Load the client list once on mount
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -34,22 +32,34 @@ export default function Clients({ user }) {
     load();
   }, []);
 
-  // Only Admins and Senior Auditors can create/edit/delete clients
   const isAdmin  = user.role === "Admin";
   const isSenior = user.role === "Senior Auditor";
   const canEdit  = isAdmin || isSenior;
 
-  // Opens the modal in "create" mode with a blank form
+  const filteredClients = clients.filter((c) => {
+    if (!searchTerm) return true;
+    const q = searchTerm.toLowerCase();
+    return (
+      (c.company_name || "").toLowerCase().includes(q) ||
+      (c.contact_person || "").toLowerCase().includes(q) ||
+      (c.email || "").toLowerCase().includes(q) ||
+      (c.phone || "").toLowerCase().includes(q)
+    );
+  });
+
   const openCreate = () => {
     setEditingClient(null);
-    setForm({ company_name: "", contact_person: "", email: "", phone: "", industry: "", address: "", status: "Active" });
+    setForm({
+      company_name: "", contact_person: "", email: "",
+      phone: "", industry: "", address: "", status: "Active",
+      kra_pin: false, kra_pin_number: "",
+    });
     setShowModal(true);
   };
 
-  // Opens the modal in "edit" mode, pre-filling the form with the
-  // selected client's existing values (falling back to "" for any missing field)
   const openEdit = (c) => {
     setEditingClient(c);
+    setSelectedClient(c);
     setForm({
       company_name:   c.company_name   || "",
       contact_person: c.contact_person || "",
@@ -58,21 +68,26 @@ export default function Clients({ user }) {
       industry:       c.industry       || "",
       address:        c.address        || "",
       status:         c.status         || "Active",
+      kra_pin:        c.kra_pin        || false,
+      kra_pin_number: c.kra_pin_number || "",
     });
     setShowModal(true);
   };
 
-  // Handles form submission for both create and edit modes.
   const handleSave = async (e) => {
     e && e.preventDefault();
     if (!canEdit) return;
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        kra_pin_number: form.kra_pin ? form.kra_pin_number : null,
+      };
       if (editingClient) {
-        const res = await updateClient(editingClient.client_id, form);
+        const res = await updateClient(editingClient.client_id, payload);
         if (res.data?.detail) throw new Error(res.data.detail);
       } else {
-        const res = await createClient(form);
+        const res = await createClient(payload);
         if (res.data?.detail) throw new Error(res.data.detail);
       }
       setShowModal(false);
@@ -85,7 +100,6 @@ export default function Clients({ user }) {
     setSaving(false);
   };
 
-  // Deletes a client after a confirmation prompt, then refreshes the list
   const handleDelete = async (c) => {
     if (!canEdit) return;
     if (!window.confirm(`Delete client "${c.company_name}"? This cannot be undone.`)) return;
@@ -93,6 +107,9 @@ export default function Clients({ user }) {
       await deleteClient(c.client_id);
       const list = await getClients();
       setClients(Array.isArray(list.data) ? list.data : []);
+      if (selectedClient?.client_id === c.client_id) {
+        setSelectedClient(null);
+      }
     } catch (err) {
       console.error(err);
       alert(err.message || "Could not delete client");
@@ -112,55 +129,119 @@ export default function Clients({ user }) {
         )}
       </div>
 
-      {/* Table: loading state, empty state, or populated client list */}
+      {/* Table */}
       <div className="cl-table-wrap">
         {loading ? (
           <p className="cl-loading">Loading clients...</p>
         ) : clients.length === 0 ? (
           <p className="cl-empty">No clients yet.</p>
         ) : (
-          <table className="cl-table">
-            <thead>
-              <tr>
-                {["Company", "Contact", "Email", "Phone", "Status", ""].map((h) => (
-                  <th key={h}>{h}</th>
+          <div className="cl-client-picker">
+            <div className="cl-picker-row">
+              <label className="cl-form-label" htmlFor="client-search">
+                Search clients
+              </label>
+              <input
+                id="client-search"
+                className="cl-form-input"
+                placeholder="Search by company, contact, email, or phone"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="cl-picker-row">
+              <label className="cl-form-label" htmlFor="client-select">
+                Choose a client
+              </label>
+              <select
+                id="client-select"
+                className="cl-form-select"
+                value={selectedClient?.client_id || ""}
+                onChange={(e) => {
+                  const client = clients.find((c) => String(c.client_id) === e.target.value);
+                  setSelectedClient(client || null);
+                }}
+              >
+                <option value="">Choose a client...</option>
+                {filteredClients.map((c) => (
+                  <option key={c.client_id} value={c.client_id}>
+                    {c.company_name} — {c.contact_person || "No contact"}
+                  </option>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {clients.map((c) => (
-                <tr key={c.client_id}>
-                  <td className="cl-td-name">{c.company_name}</td>
-                  <td>{c.contact_person || "—"}</td>
-                  <td>{c.email || "—"}</td>
-                  <td>{c.phone || "—"}</td>
-                  {/* Status cell styled green/active vs. grey/inactive */}
-                  <td className={c.status === "Active" ? "cl-td-status--active" : "cl-td-status--inactive"}>
-                    {c.status || "Unknown"}
-                  </td>
-                  <td>
-                    {/* Edit/Delete actions only visible to authorized roles */}
-                    {canEdit && (
-                      <>
-                        <button className="cl-btn-edit" onClick={() => openEdit(c)}>Edit</button>
-                        <button className="cl-btn-delete" onClick={() => handleDelete(c)}>Delete</button>
-                      </>
-                    )}
-                    <button className="cl-btn-view" onClick={() => navigate(`/clients/${c.client_id}`)}>View</button> 
-                    
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              </select>
+            </div>
+            {filteredClients.length === 0 && (
+              <p className="cl-empty">No clients match your search.</p>
+            )}
+
+            {selectedClient ? (
+              <div className="cl-detail-card">
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">Company</span>
+                  <span>{selectedClient.company_name || "—"}</span>
+                </div>
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">Contact</span>
+                  <span>{selectedClient.contact_person || "—"}</span>
+                </div>
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">Email</span>
+                  <span>{selectedClient.email || "—"}</span>
+                </div>
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">Phone</span>
+                  <span>{selectedClient.phone || "—"}</span>
+                </div>
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">Industry</span>
+                  <span>{selectedClient.industry || "—"}</span>
+                </div>
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">Address</span>
+                  <span>{selectedClient.address || "—"}</span>
+                </div>
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">Status</span>
+                  <span>{selectedClient.status || "Unknown"}</span>
+                </div>
+                <div className="cl-detail-row">
+                  <span className="cl-detail-label">KRA PIN</span>
+                  <span>{selectedClient.kra_pin ? selectedClient.kra_pin_number || "Yes" : "No"}</span>
+                </div>
+                {canEdit && (
+                  <div className="cl-detail-actions">
+                    <button type="button" className="cl-btn-edit" onClick={() => openEdit(selectedClient)}>
+                      Edit
+                    </button>
+                    <button type="button" className="cl-btn-delete" onClick={() => handleDelete(selectedClient)}>
+                      Delete
+                    </button>
+                    <button type="button" className="cl-btn-view" onClick={() => navigate(`/clients/${selectedClient.client_id}`)}>
+                      View
+                    </button>
+                  </div>
+                )}
+                {!canEdit && (
+                  <div className="cl-detail-actions">
+                    <button type="button" className="cl-btn-view" onClick={() => navigate(`/clients/${selectedClient.client_id}`)}>
+                      View
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              filteredClients.length > 0 && (
+                <p className="cl-empty">Select a client to view their details.</p>
+              )
+            )}
+          </div>
         )}
       </div>
 
-      {/* Add/Edit modal — shared form for both create and edit flows */}
+      {/* Modal */}
       {showModal && canEdit && (
         <div className="cl-modal-overlay">
           <div className="cl-modal">
-            {/* Title switches based on whether we're editing an existing client */}
             <h3 className="cl-modal-title">{editingClient ? "Edit Client" : "Add Client"}</h3>
             <form onSubmit={handleSave}>
 
@@ -194,6 +275,38 @@ export default function Clients({ user }) {
                 <option value="Active">Active</option>
                 <option value="Inactive">Inactive</option>
               </select>
+
+              {/* KRA PIN checkbox */}
+              <div className="cl-kra-row">
+                <input
+                  type="checkbox"
+                  id="kra_pin_check"
+                  checked={!!form.kra_pin}
+                  onChange={(e) => setForm({
+                    ...form,
+                    kra_pin: e.target.checked,
+                    kra_pin_number: e.target.checked ? form.kra_pin_number : "",
+                  })}
+                  className="cl-kra-checkbox"
+                />
+                <label htmlFor="kra_pin_check" className="cl-form-label cl-kra-label">
+                  Has KRA PIN
+                </label>
+              </div>
+
+              {/* PIN number — only shown when checkbox is checked */}
+              {form.kra_pin && (
+                <>
+                  <label className="cl-form-label">KRA PIN Number</label>
+                  <input
+                    required
+                    className="cl-form-input cl-kra-input"
+                    placeholder="e.g. A000000000A"
+                    value={form.kra_pin_number}
+                    onChange={(e) => setForm({ ...form, kra_pin_number: e.target.value.toUpperCase() })}
+                  />
+                </>
+              )}
 
               <div className="cl-modal-actions">
                 <button type="button" className="cl-btn-cancel" onClick={() => setShowModal(false)}>Cancel</button>

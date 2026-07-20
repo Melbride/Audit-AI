@@ -27,6 +27,7 @@ from database import (
     save_cleaning_snapshot, get_cleaning_snapshot,
 )
 from cleaner import clean_dataframe
+from report_routes import router as report_router
 load_dotenv()
 
 
@@ -59,6 +60,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(report_router)
+
 SECRET_KEY = "auditiq-secret-key-change-in-production"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 8
@@ -75,6 +78,10 @@ def create_token(data: dict):
     data.update({"exp": expire})
     return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
 
+@app.get("/")
+def root():
+    return {"message": "Audit AI API is running"}
+
 @app.on_event("startup")
 def startup_event():
     init_db()
@@ -89,6 +96,7 @@ class Client(BaseModel):
     address: Optional[str] = None
     status: Optional[str] = "Active"
     kra_pin: Literal[True, False] = False
+    kra_pin_number: Optional[str] = None
 
 class User(BaseModel):
     full_name: str
@@ -183,20 +191,19 @@ def get_client(client_id: int, db=Depends(get_db)):
 def create_client(c: Client, db=Depends(get_db)):
     cursor = db.cursor()
     cursor.execute(
-        """INSERT INTO clients (company_name, contact_person, email, phone, industry, address, status, kra_pin)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-        (c.company_name, c.contact_person, c.email, c.phone, c.industry, c.address, c.status, c.kra_pin)
+        """INSERT INTO clients (company_name, contact_person, email, phone, industry, address, status, kra_pin, kra_pin_number)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (c.company_name, c.contact_person, c.email, c.phone, c.industry, c.address, c.status, c.kra_pin, c.kra_pin_number)
     )
     db.commit()
     return {"client_id": cursor.lastrowid, "message": "Client created"}
-
 @app.put("/clients/{client_id}")
 def update_client(client_id: int, c: Client, db=Depends(get_db)):
     cursor = db.cursor()
     cursor.execute(
         """UPDATE clients SET company_name=%s, contact_person=%s, email=%s,
-           phone=%s, industry=%s, address=%s, status=%s, kra_pin=%s WHERE client_id=%s""",
-        (c.company_name, c.contact_person, c.email, c.phone, c.industry, c.address, c.status, c.kra_pin, client_id)
+           phone=%s, industry=%s, address=%s, status=%s, kra_pin=%s, kra_pin_number=%s WHERE client_id=%s""",
+        (c.company_name, c.contact_person, c.email, c.phone, c.industry, c.address, c.status, c.kra_pin, c.kra_pin_number, client_id)
     )
     db.commit()
     return {"message": "Client updated"}
@@ -234,10 +241,40 @@ def get_users(db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
     cursor.execute("""
         SELECT u.user_id, u.full_name, u.email, u.phone, u.role, u.status,
-               u.assigned_client_id, u.created_at, c.company_name
+               u.assigned_client_id, u.login_locked, u.last_login, u.created_at, c.company_name
         FROM users u
         LEFT JOIN clients c ON u.assigned_client_id = c.client_id
     """)
+    return cursor.fetchall()
+
+@app.put("/users/{user_id}/reset-password")
+def reset_user_password(user_id: int, payload: dict, db=Depends(get_db)):
+    new_password = payload.get("new_password")
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    cursor = db.cursor()
+    hashed = hash_password(new_password)
+    cursor.execute("UPDATE users SET password_hash = %s, failed_attempts = 0 WHERE user_id = %s", (hashed, user_id))
+    db.commit()
+    return {"message": "Password reset successful"}
+
+@app.put("/users/{user_id}/login-lock")
+def set_user_login_lock(user_id: int, payload: dict, db=Depends(get_db)):
+    locked = payload.get("locked")
+    if locked is None:
+        raise HTTPException(status_code=400, detail="Missing locked flag")
+    cursor = db.cursor()
+    cursor.execute("UPDATE users SET login_locked = %s WHERE user_id = %s", (1 if locked else 0, user_id))
+    db.commit()
+    return {"message": "Login access updated", "login_locked": bool(locked)}
+
+@app.get("/users/{user_id}/login-history")
+def get_user_login_history(user_id: int, db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+    cursor.execute(
+        "SELECT id, timestamp, ip_address, device, status FROM login_history WHERE user_id = %s ORDER BY timestamp DESC",
+        (user_id,)
+    )
     return cursor.fetchall()
 
 @app.get("/users/{user_id}")
@@ -296,11 +333,44 @@ def login(req: LoginRequest, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
     cursor.execute("SELECT * FROM users WHERE email = %s", (req.email,))
     user = cursor.fetchone()
-    if not user or not verify_password(req.password, user["password_hash"]):
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if user.get("login_locked"):
+        cursor.execute(
+            "INSERT INTO login_history (user_id, ip_address, device, status) VALUES (%s, %s, %s, %s)",
+            (user["user_id"], None, None, "locked")
+        )
+        db.commit()
+        raise HTTPException(status_code=403, detail="Account is locked")
+
+    if not verify_password(req.password, user["password_hash"]):
+        cursor.execute("UPDATE users SET failed_attempts = failed_attempts + 1 WHERE user_id = %s", (user["user_id"],))
+        cursor.execute(
+            "INSERT INTO login_history (user_id, ip_address, device, status) VALUES (%s, %s, %s, %s)",
+            (user["user_id"], None, None, "failed")
+        )
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
     if user["status"] != "Active":
+        cursor.execute(
+            "INSERT INTO login_history (user_id, ip_address, device, status) VALUES (%s, %s, %s, %s)",
+            (user["user_id"], None, None, "inactive")
+        )
+        db.commit()
         raise HTTPException(status_code=403, detail="Account is inactive")
+
     token = create_token({"user_id": user["user_id"], "email": user["email"], "role": user["role"]})
+    cursor.execute(
+        "UPDATE users SET failed_attempts = 0, last_login = NOW() WHERE user_id = %s",
+        (user["user_id"],)
+    )
+    cursor.execute(
+        "INSERT INTO login_history (user_id, ip_address, device, status) VALUES (%s, %s, %s, %s)",
+        (user["user_id"], None, None, "success")
+    )
+    db.commit()
     return {"access_token": token, "token_type": "bearer",
             "user": {"user_id": user["user_id"], "full_name": user["full_name"],
                      "email": user["email"], "role": user["role"]}}
@@ -577,7 +647,47 @@ def create_submission(s: Submission, db=Depends(get_db)):
                                (auditor['user_id'], message, 'engagement_alert'))
     db.commit()
     return {"submission_id": submission_id, "message": "Submission created"}
+def auto_update_engagement_status(engagement_id: int, db):
+    cursor = db.cursor(dictionary=True)
 
+    # Get all sections for this engagement
+    cursor.execute("SELECT section_id FROM audit_sections WHERE engagement_id = %s", (engagement_id,))
+    sections = cursor.fetchall()
+    if not sections:
+        return
+
+    section_ids = [s['section_id'] for s in sections]
+
+    # Get latest submission status per section
+    statuses = []
+    for sid in section_ids:
+        cursor.execute("""
+            SELECT status FROM submissions
+            WHERE section_id = %s
+            ORDER BY created_at DESC LIMIT 1
+        """, (sid,))
+        row = cursor.fetchone()
+        statuses.append(row['status'] if row else 'Draft')
+
+    # Get current engagement status
+    cursor.execute("SELECT status FROM engagements WHERE engagement_id = %s", (engagement_id,))
+    eng = cursor.fetchone()
+    current = eng['status'] if eng else 'Planning'
+
+    # Determine new status based on submission statuses
+    if all(s == 'Approved' for s in statuses):
+        new_status = 'Review'
+    elif any(s in ('Under Review', 'Changes Requested', 'Approved') for s in statuses):
+        new_status = 'In Progress'
+    else:
+        new_status = current  # no change
+
+    # Only update if status actually changed
+    if new_status != current:
+        cursor.execute(
+            "UPDATE engagements SET status = %s WHERE engagement_id = %s",
+            (new_status, engagement_id)
+        )
 @app.put("/submissions/{submission_id}/status")
 def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -621,6 +731,15 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
         for row in cursor2.fetchall():
             cursor2.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
                             (row['user_id'], message, "engagement_alert"))
+
+    # Auto-update engagement status based on all section submission states
+    auto_update_engagement_status(sub['engagement_id'], db)
+
+    # Auto-update engagement status based on all section submission states
+    auto_update_engagement_status(sub['engagement_id'], db)
+
+    # Auto-update engagement status based on all section submission states
+    auto_update_engagement_status(sub['engagement_id'], db)
 
     db.commit()
     return {"message": f"Submission status updated to {s.status}"}
@@ -1024,6 +1143,11 @@ async def send_to_client(engagement_id: int, db=Depends(get_db)):
              f"Audit report for {engagement['engagement_name']} has been sent to {engagement['company_name']}",
              "engagement_alert")
         )
+        # Mark engagement as Completed when report is sent to client
+    cursor.execute(
+        "UPDATE engagements SET status = 'Completed' WHERE engagement_id = %s",
+        (engagement_id,)
+    )
     db.commit()
     return {"message": f"Audit report sent to {engagement['client_email']}"}
 

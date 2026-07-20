@@ -103,9 +103,21 @@ def init_db():
             role VARCHAR(50) NOT NULL,
             assigned_client_id INT,
             status VARCHAR(50) DEFAULT 'Active',
+            login_locked TINYINT(1) DEFAULT 0,
+            failed_attempts INT DEFAULT 0,
+            last_login DATETIME,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'users' AND column_name = 'login_locked'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE users ADD COLUMN login_locked TINYINT(1) DEFAULT 0")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'users' AND column_name = 'failed_attempts'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE users ADD COLUMN failed_attempts INT DEFAULT 0")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'users' AND column_name = 'last_login'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_login DATETIME")
 
     # Password resets table. Stores temporary tokens for password reset requests.
     # Token must be unique. Expires after 1 hour.
@@ -118,6 +130,28 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Login history table. Tracks login attempts with IP/device metadata.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS login_history (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            ip_address VARCHAR(100),
+            device VARCHAR(255),
+            status VARCHAR(50) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'login_history' AND column_name = 'ip_address'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE login_history ADD COLUMN ip_address VARCHAR(100)")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'login_history' AND column_name = 'device'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE login_history ADD COLUMN device VARCHAR(255)")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'login_history' AND column_name = 'status'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE login_history ADD COLUMN status VARCHAR(50) NOT NULL")
 
     # Engagements table. Represents an audit engagement for a client for a specific financial year
     cursor.execute("""
@@ -301,6 +335,62 @@ def init_db():
             snapshot_data LONGTEXT NOT NULL,
             created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (file_id, client_id, file_type)
+        )
+    """)
+
+    # Report generator tables (Month 3)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id VARCHAR(255) PRIMARY KEY,
+            client_id INT NOT NULL,
+            engagement_id INT,
+            file_id VARCHAR(64),
+            type VARCHAR(100),
+            period_start DATE,
+            period_end DATE,
+            status VARCHAR(50),
+            current_version_id VARCHAR(255),
+            created_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (engagement_id) REFERENCES engagements(engagement_id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS report_versions (
+            id VARCHAR(255) PRIMARY KEY,
+            report_id VARCHAR(255) NOT NULL,
+            version_number INT NOT NULL,
+            financial_summary LONGTEXT,
+            ai_insights LONGTEXT,
+            commentary TEXT,
+            chart_refs LONGTEXT,
+            generated_by VARCHAR(50),
+            edited_by INT,
+            status VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS report_approvals (
+            id VARCHAR(255) PRIMARY KEY,
+            report_version_id VARCHAR(255) NOT NULL,
+            approver_id INT,
+            decision VARCHAR(50),
+            notes TEXT,
+            decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS report_exports (
+            id VARCHAR(255) PRIMARY KEY,
+            report_version_id VARCHAR(255) NOT NULL,
+            format VARCHAR(50),
+            file_url VARCHAR(500),
+            exported_by INT,
+            exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 

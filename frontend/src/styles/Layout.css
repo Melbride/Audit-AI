@@ -1,4 +1,4 @@
-/* Layout.css */
+﻿/* Layout.css */
 
 .layout-root {
   display: flex;
@@ -17,7 +17,7 @@
   flex-direction: column;
   height: 100vh;
   padding: 28px 0 0;
-  background: var(--surface);          /* Deep slate container */
+  background: var(--white);
   color: var(--text);
   border-right: 1px solid var(--border);
   box-shadow: var(--shadow-md);
@@ -41,13 +41,14 @@
   align-items: center;
   justify-content: center;
   background: var(--surface-hover);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 4px 10px rgba(0,0,0,.3);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 12px rgba(15,45,158,.24);
 }
 
 .layout-logo-icon img {
-  width: 20px;
-  height: 20px;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
 }
 
 .layout-logo-text {
@@ -85,7 +86,7 @@
   cursor: pointer;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--text-soft); /* Off-white secondary */
+  color: var(--text);
   transition:
     background .18s ease,
     color .18s ease;
@@ -95,7 +96,7 @@
   width: 17px;
   height: 17px;
   opacity: .75;
-  color: var(--secondary); /* Muted slate icons */
+  color: var(--primary);
   transition: .18s;
 }
 
@@ -107,18 +108,18 @@
 
 .layout-nav-item:hover svg {
   opacity: 1;
-  color: var(--accent); /* Changes icon to Sky Blue on hover */
+  color: var(--primary);
 }
 
 /* Active */
 .layout-nav-item.active {
-  background: rgba(56, 189, 248, 0.08); /* Transparent blue glow */
+  background: var(--surface-hover);
   color: var(--text);
   font-weight: 600;
 }
 
 .layout-nav-item.active svg {
-  color: var(--accent); /* Active sky blue */
+  color: var(--primary);
   opacity: 1;
 }
 
@@ -131,13 +132,13 @@
   bottom: 8px;
   width: 4px;
   border-radius: 0 4px 4px 0;
-  background: var(--primary); /* Teal indicator bar */
-  box-shadow: 0 0 10px rgba(45, 212, 191, 0.45);
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(243,112,35,0.45);
 }
 
 /* Keyboard focus */
 .layout-nav-item:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -170,8 +171,8 @@
   margin: 0 0 8px 0 !important;       /* Spaces role from email */
   padding: 2px 6px !important;
   border-radius: 4px !important;
-  background: rgba(45, 212, 191, 0.08) !important; /* Teal background badge */
-  color: var(--primary) !important;                 /* Teal text */
+  background: var(--surface-hover) !important;
+  color: var(--text) !important;
   font-size: 10px !important;
   font-weight: 700 !important;
   letter-spacing: .05em !important;
@@ -181,7 +182,7 @@
 
 .layout-sidebar .layout-user-email {
   margin: 0 0 16px 0 !important;      /* Spacing above logout */
-  color: var(--text-soft) !important; /* Off-white secondary */
+  color: var(--text-soft) !important;
   font-size: 11.5px !important;
   white-space: nowrap;
   overflow: hidden;
@@ -198,9 +199,9 @@
   justify-content: center !important;
   gap: 8px !important;
   padding: 8px 12px !important;
-  background: rgba(239, 68, 68, 0.04) !important; /* Subtle crimson background */
-  color: var(--danger-text) !important;          /* Exception alert text */
-  border: 1px solid rgba(239, 68, 68, 0.12) !important; /* Soft red border */
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
   border-radius: 6px !important;
   font-size: 12.5px !important;
   font-weight: 600 !important;
@@ -210,10 +211,10 @@
 }
 
 .layout-sidebar .layout-logout-btn:hover {
-  background: var(--danger) !important;     /* Crimson background on hover */
-  color: var(--background) !important;      /* Dark contrast text */
-  border-color: var(--danger) !important;
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15) !important;
+  background: var(--accent) !important;
+  color: var(--text) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 4px 12px rgba(243,112,35,0.25) !important;
 }
 
 .layout-sidebar .layout-logout-btn:active {
@@ -245,7 +246,7 @@
 }
 
 .layout-main::-webkit-scrollbar-thumb:hover {
-  background: var(--primary);
+  background: var(--white);
 }
 
 /* Responsive */
@@ -286,3 +287,7 @@
     padding: 24px;
   }
 }
+
+
+
+
