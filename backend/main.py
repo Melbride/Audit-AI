@@ -77,6 +77,10 @@ async def startup_event():
 from report_routes import router as report_router
 app.include_router(report_router)
 
+# Report export system (Month 3): /api/reports/{id}/export, /api/reports/exports/{id}/download
+from report_exports import router as report_export_router
+app.include_router(report_export_router)
+
 # Auth configuration: secret key, hashing algorithm, token lifetime, and password hashing context
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
@@ -596,6 +600,7 @@ class Notification(BaseModel):
 #   custom  -> start_date + end_date (YYYY-MM-DD)
 class ReportGenerateRequest(BaseModel):
     client_id: int
+    engagement_id: int
     file_id: str
     file_type: Optional[str] = "general"
     report_type: Literal["monthly", "yearly", "custom"]
@@ -1365,10 +1370,10 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
     cursor = db.cursor()
     cursor.execute(
         """INSERT INTO reports
-           (id, client_id, type, period_start, period_end, status, current_version_id, created_by, created_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+           (id, client_id, engagement_id, file_id, type, period_start, period_end, status, current_version_id, created_by, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
-            report_id, req.client_id, req.report_type,
+            report_id, req.client_id, req.engagement_id, req.file_id, req.report_type,
             period_start.date(), period_end.date(),
             "draft", version_id, req.generated_by, datetime.utcnow(),
         )
@@ -1391,6 +1396,7 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
     return {
         "report_id": report_id,
         "client_id": req.client_id,
+        "engagement_id": req.engagement_id,
         "report_type": req.report_type,
         "period_label": period_label,
         "period_start": period_start.date().isoformat(),

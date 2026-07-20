@@ -227,9 +227,13 @@ export const submitCorrectedExcel = (formData) =>
 export const generateReport = (data) =>
     API.post('/api/reports/generate', data)
 
-// List reports, optionally filtered to one client
-export const getReports = (clientId) =>
-    API.get('/api/reports', clientId ? { params: { client_id: clientId } } : undefined)
+// List reports, optionally filtered to one client and/or one engagement
+export const getReports = (clientId, engagementId) => {
+    const params = {}
+    if (clientId) params.client_id = clientId
+    if (engagementId) params.engagement_id = engagementId
+    return API.get('/api/reports', Object.keys(params).length ? { params } : undefined)
+}
 
 // Fetch a report's current version, edit history, and full detail
 export const getReport = (reportId) =>
@@ -252,6 +256,18 @@ export const approveReport = (reportId, data) =>
 // data = { notes }
 export const requestReportChanges = (reportId, data) =>
     API.post(`/api/reports/${reportId}/request-changes`, data)
+
+// Generate a PDF/Excel/CSV export of a report's current version.
+// Returns { export_id, format, message } — pass export_id to
+// getExportDownloadUrl() to build the actual download link.
+export const exportReport = (reportId, format) =>
+    API.post(`/api/reports/${reportId}/export`, { format })
+
+// Builds the direct download URL for a previously generated export.
+// Not an axios call — this endpoint is intentionally unauthenticated
+// (window.open() can't carry the Bearer token), so it's just a URL string.
+export const getExportDownloadUrl = (exportId) =>
+    `${API.defaults.baseURL}/api/reports/exports/${exportId}/download`
 
 // ===============================
 // LOGIN MANAGEMENT

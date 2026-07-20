@@ -353,6 +353,13 @@ export default function EngagementDetail({ user }) {
           {engagement.company_name || "—"} · FY{" "}
           {engagement.financial_year || "—"}
         </p>
+
+        <button
+          className="action-btn secondary"
+          onClick={() => navigate(`/analysis/${engagementId}`)}
+        >
+          View Analysis
+        </button>
       </div>
 
       {/* Allow Engagement Partner, Quality Reviewer, and Admin to send the final approved report to the client */}

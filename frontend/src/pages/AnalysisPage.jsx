@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { getEngagement } from "../services/api";
+import GenerateReportModal from "../components/GenerateReportModal";
 
 // ── MOCK DATA ─────────────────────────────────────────────────────────────────
 const MOCK_FULL = {
@@ -189,8 +192,28 @@ function Sparkline({ values, color, width = 80, height = 28 }) {
 
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function Analytics({ user }) {
+  const { engagementId } = useParams();
+  const navigate = useNavigate();
+  const [engagement, setEngagement] = useState(null);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [scope, setScope] = useState("full");
   const [expandedInsight, setExpandedInsight] = useState(null);
+
+  // When reached via /analysis/:engagementId (from EngagementDetail's "View
+  // Analysis" button), fetch the real engagement so we know its client_id
+  // for report generation. The financial charts/insights below are still
+  // mock data — that part hasn't been wired to the real /analyze endpoints
+  // yet, this is just enough to pass real client_id/engagement_id to
+  // Generate Report.
+  useEffect(() => {
+    if (!engagementId) {
+      setEngagement(null);
+      return;
+    }
+    getEngagement(engagementId)
+      .then((res) => setEngagement(res.data))
+      .catch((err) => console.error("Failed to load engagement", err));
+  }, [engagementId]);
 
   const data = scope === "full" ? MOCK_FULL : MOCK_EXPENSE_ONLY;
   const { financial_summary: fs, ai_insights, analysis_scope } = data;
@@ -229,8 +252,27 @@ export default function Analytics({ user }) {
               cursor: "pointer", fontWeight: scope === s ? "600" : "400",
             }}>{s}</button>
           ))}
+          {engagement && (
+            <button
+              onClick={() => setShowGenerateModal(true)}
+              style={{
+                padding: "6px 14px", fontSize: "12px", borderRadius: "6px",
+                border: "none", background: "#2a78d6", color: "#fff",
+                cursor: "pointer", fontWeight: "600", marginLeft: "8px",
+              }}
+            >
+              Generate Report
+            </button>
+          )}
         </div>
       </div>
+
+      {engagement && (
+        <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "-16px 0 20px" }}>
+          Scoped to engagement: <strong>{engagement.engagement_name}</strong>
+          {engagement.company_name ? ` · ${engagement.company_name}` : ""}
+        </p>
+      )}
 
       {/* ── SCOPE BANNER ── */}
       {analysis_scope !== "full" && (
@@ -418,6 +460,20 @@ export default function Analytics({ user }) {
           <p style={{ fontSize: "15px", fontWeight: "600", color: "#5d6d7e", margin: "0 0 6px" }}>Could not determine data type</p>
           <p style={{ fontSize: "13px", margin: 0 }}>Upload a file with clearer financial structure to generate insights.</p>
         </div>
+      )}
+
+      {showGenerateModal && engagement && (
+        <GenerateReportModal
+          user={user}
+          initialClientId={engagement.client_id}
+          initialEngagementId={engagementId}
+          lockClientEngagement
+          onClose={() => setShowGenerateModal(false)}
+          onGenerated={(reportId) => {
+            setShowGenerateModal(false);
+            navigate(`/reports/${reportId}`);
+          }}
+        />
       )}
     </div>
   );

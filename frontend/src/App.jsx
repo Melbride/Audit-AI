@@ -99,7 +99,18 @@ function App() {
           element={
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
-                <AnalysisPage />
+                <AnalysisPage user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        {/* Analysis scoped to a specific engagement, linked from EngagementDetail */}
+        <Route
+          path="/analysis/:engagementId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <AnalysisPage user={user} />
               </Layout>
             </RequireAuth>
           }

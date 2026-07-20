@@ -19,7 +19,9 @@ import {
   updateReportCommentary,
   updateReportInsights,
   approveReport,
-  requestReportChanges
+  requestReportChanges,
+  exportReport,
+  getExportDownloadUrl
 } from "../services/api";
 import "../styles/ReportReview.css";
 
@@ -206,7 +208,29 @@ export default function ReportReview({ reportId, user }) {
       setSubmittingAction(false);
     }
   };
+// Export Report
+const handleExport = async (format) => {
+  try {
+    const res = await exportReport(reportId, format);
 
+    const downloadUrl = getExportDownloadUrl(
+      res.data.export_id
+    );
+
+    window.open(downloadUrl, "_blank");
+
+    showAlert(
+      "success",
+      `${format.toUpperCase()} report exported successfully.`
+    );
+  } catch (err) {
+    console.error(err);
+    showAlert(
+      "error",
+      err.response?.data?.detail || "Failed to export report."
+    );
+  }
+};
   if (loading) {
     return (
       <div className="loader-container">
@@ -471,6 +495,45 @@ export default function ReportReview({ reportId, user }) {
               </div>
             )}
           </div>
+          {/* Export Report */}
+<div className="action-box">
+  <h3
+    className="font-semibold text-slate-800 text-[14px] mb-3"
+    style={{ display: "flex", alignItems: "center", gap: "8px" }}
+  >
+    <FileText size={16} />
+    Export Report
+  </h3>
+
+  <div className="action-buttons-group">
+    <button
+      className="btn btn-primary w-full"
+      onClick={() => handleExport("pdf")}
+    >
+      📄 Export PDF
+    </button>
+
+    <button
+      className="btn w-full"
+      style={{
+        background: "#16a34a",
+        color: "#fff",
+        marginTop: "10px"
+      }}
+      onClick={() => handleExport("excel")}
+    >
+      📊 Export Excel
+    </button>
+
+    <button
+      className="btn btn-secondary w-full"
+      style={{ marginTop: "10px" }}
+      onClick={() => handleExport("csv")}
+    >
+      📑 Export CSV
+    </button>
+  </div>
+</div>
 
           {/* Timeline / History */}
           <div className="action-box">

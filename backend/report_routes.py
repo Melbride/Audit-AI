@@ -19,6 +19,16 @@ users.assigned_client_id). Run:
   ALTER TABLE reports ADD COLUMN client_id INT NOT NULL AFTER id;
 before this router will work against your live DB.
 
+NOTE: engagement_id and file_id link a report back to the specific
+engagement and uploaded source file it was generated from (previously a
+report was only tied to a client, with no way to tell which engagement or
+which upload produced it). Both are nullable since nothing populates them
+yet — no /generate endpoint exists in this router. Run:
+  ALTER TABLE reports ADD COLUMN engagement_id INT NULL AFTER client_id;
+  ALTER TABLE reports ADD CONSTRAINT fk_reports_engagement
+    FOREIGN KEY (engagement_id) REFERENCES engagements(engagement_id);
+  ALTER TABLE reports ADD COLUMN file_id VARCHAR(64) NULL AFTER engagement_id;
+
 Wire this into Audit.py with:
 
     from report_routes import router as report_router
@@ -99,13 +109,21 @@ def _fetch_history(cursor, report_id: str):
 # --- Endpoints -------------------------------------------------------------
 
 @router.get("")
-def list_reports(client_id: Optional[int] = None, db=Depends(get_db)):
-    """List reports, optionally filtered to one client, for the browsable list."""
+def list_reports(
+    client_id: Optional[int] = None,
+    engagement_id: Optional[int] = None,
+    db=Depends(get_db),
+):
+    """List reports, optionally filtered to one client and/or one engagement,
+    for the browsable list."""
     cursor = db.cursor(dictionary=True)
     query = """
         SELECT
             r.id,
             r.client_id,
+            r.engagement_id,
+            eng.engagement_name,
+            r.file_id,
             r.type,
             r.period_start,
             r.period_end,
@@ -116,13 +134,20 @@ def list_reports(client_id: Optional[int] = None, db=Depends(get_db)):
         FROM reports r
         LEFT JOIN users u ON r.created_by = u.user_id
         LEFT JOIN report_versions rv ON r.current_version_id = rv.id
+        LEFT JOIN engagements eng ON r.engagement_id = eng.engagement_id
     """
-    params = ()
+    conditions = []
+    params = []
     if client_id is not None:
-        query += " WHERE r.client_id = %s"
-        params = (client_id,)
+        conditions.append("r.client_id = %s")
+        params.append(client_id)
+    if engagement_id is not None:
+        conditions.append("r.engagement_id = %s")
+        params.append(engagement_id)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY r.created_at DESC"
-    cursor.execute(query, params)
+    cursor.execute(query, tuple(params))
     return cursor.fetchall()
 
 
@@ -130,7 +155,15 @@ def list_reports(client_id: Optional[int] = None, db=Depends(get_db)):
 def get_report(report_id: str, db=Depends(get_db)):
     """Fetch the report's current version, ready for the review UI."""
     cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
+    cursor.execute(
+        """
+        SELECT r.*, eng.engagement_name
+        FROM reports r
+        LEFT JOIN engagements eng ON r.engagement_id = eng.engagement_id
+        WHERE r.id = %s
+        """,
+        (report_id,),
+    )
     report = cursor.fetchone()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")

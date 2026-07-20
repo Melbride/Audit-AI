@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { FileText, Clock } from "../components/Icons";
+import { Link, useNavigate } from "react-router-dom";
+import { FileText, Clock, Plus } from "../components/Icons";
 import { getReports } from "../services/api";
+import GenerateReportModal from "../components/GenerateReportModal";
 
 const STATUS_STYLES = {
   draft: "bg-slate-100 text-slate-600",
@@ -19,24 +20,33 @@ const STATUS_LABELS = {
   exported: "Exported",
 };
 
-export default function Reports() {
+export default function Reports({ user }) {
+  const navigate = useNavigate();
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+
+  const loadReports = async () => {
+    try {
+      setLoading(true);
+      const res = await getReports();
+      setReports(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await getReports();
-        setReports(res.data);
-      } catch (err) {
-        setError(err.response?.data?.detail || err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    loadReports();
   }, []);
+
+  const handleGenerated = (reportId) => {
+    setShowGenerateModal(false);
+    navigate(`/reports/${reportId}`);
+  };
 
   if (loading) {
     return <div className="p-6 text-[13px] text-slate-500">Loading reports…</div>;
@@ -47,7 +57,16 @@ export default function Reports() {
 
   return (
     <div className="p-6" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      <h1 className="text-[18px] font-semibold text-slate-800 mb-4">Reports</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-[18px] font-semibold text-slate-800">Reports</h1>
+        <button
+          className="btn btn-primary flex items-center gap-1.5"
+          onClick={() => setShowGenerateModal(true)}
+        >
+          <Plus size={14} />
+          Generate Report
+        </button>
+      </div>
 
       {reports.length === 0 ? (
         <p className="text-[13px] text-slate-500">No reports yet.</p>
@@ -84,6 +103,14 @@ export default function Reports() {
             </Link>
           ))}
         </div>
+      )}
+
+      {showGenerateModal && (
+        <GenerateReportModal
+          user={user}
+          onClose={() => setShowGenerateModal(false)}
+          onGenerated={handleGenerated}
+        />
       )}
     </div>
   );
