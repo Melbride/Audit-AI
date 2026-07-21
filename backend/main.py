@@ -81,6 +81,14 @@ app.include_router(report_router)
 from report_exports import router as report_export_router
 app.include_router(report_export_router)
 
+# Section milestones (preset checkpoints) and review entries (issues/highlights/redo)
+from section_tracking import router as section_tracking_router
+app.include_router(section_tracking_router)
+
+# Financial statement starter template (Trial Balance + 3-statement skeleton)
+from statement_template import router as statement_template_router
+app.include_router(statement_template_router)
+
 # Auth configuration: secret key, hashing algorithm, token lifetime, and password hashing context
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"

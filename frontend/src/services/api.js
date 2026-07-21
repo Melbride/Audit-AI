@@ -217,23 +217,19 @@ export const submitCorrectedExcel = (formData) =>
         headers: { 'Content-Type': 'multipart/form-data' }
     })
 
-// ===============================
+//
 // REPORTS (Month 3) — versioned reports/report_versions/report_approvals
 // system, served from /api/reports (see report_routes.py)
-// ===============================
+//
 
 // Generate a new report from a cleaned file (creates the report + version 1)
 // data = { client_id, file_id, file_type, report_type, year, month, start_date, end_date, commentary, generated_by }
 export const generateReport = (data) =>
     API.post('/api/reports/generate', data)
 
-// List reports, optionally filtered to one client and/or one engagement
-export const getReports = (clientId, engagementId) => {
-    const params = {}
-    if (clientId) params.client_id = clientId
-    if (engagementId) params.engagement_id = engagementId
-    return API.get('/api/reports', Object.keys(params).length ? { params } : undefined)
-}
+// List reports, optionally filtered to one client
+export const getReports = (clientId) =>
+    API.get('/api/reports', clientId ? { params: { client_id: clientId } } : undefined)
 
 // Fetch a report's current version, edit history, and full detail
 export const getReport = (reportId) =>
@@ -257,21 +253,21 @@ export const approveReport = (reportId, data) =>
 export const requestReportChanges = (reportId, data) =>
     API.post(`/api/reports/${reportId}/request-changes`, data)
 
-// Generate a PDF/Excel/CSV export of a report's current version.
-// Returns { export_id, format, message } — pass export_id to
-// getExportDownloadUrl() to build the actual download link.
+// Generate an export file (pdf | excel | csv) of the report's current version
 export const exportReport = (reportId, format) =>
-    API.post(`/api/reports/${reportId}/export`, { format })
+    API.post(`/api/reports/${reportId}/export`, null, { params: { format } })
 
-// Builds the direct download URL for a previously generated export.
-// Not an axios call — this endpoint is intentionally unauthenticated
-// (window.open() can't carry the Bearer token), so it's just a URL string.
+// List every export previously generated for a report
+export const getReportExports = (reportId) =>
+    API.get(`/api/reports/${reportId}/exports`)
+
+// Build the direct download URL for a previously generated export
 export const getExportDownloadUrl = (exportId) =>
     `${API.defaults.baseURL}/api/reports/exports/${exportId}/download`
 
-// ===============================
+//
 // LOGIN MANAGEMENT
-// ===============================
+//
 
 // Get login history for a user
 export const getUserLoginHistory = (userId) =>
@@ -288,4 +284,51 @@ export const setUserLoginLock = (userId, locked) =>
     API.put(`/users/${userId}/login-lock`, {
         locked,
     });
+//
+// SECTION MILESTONES (preset checkpoints: Planning, Fieldwork, Testing, Wrap-up)
+//
+export const getSectionMilestones = (sectionId) =>
+    API.get(`/audit-sections/${sectionId}/milestones`)
+
+// data = { status, due_date, notes, updated_by }
+export const updateMilestone = (milestoneId, data) =>
+    API.put(`/milestones/${milestoneId}`, data)
+
+//
+// SECTION REVIEWS (issues / highlights / redo requests, logged per section)
+//
+export const getSectionReviews = (sectionId, status) =>
+    API.get(`/audit-sections/${sectionId}/reviews`, status ? { params: { status } } : undefined)
+
+// data = { review_type, notes, due_date, raised_by }
+export const createReview = (sectionId, data) =>
+    API.post(`/audit-sections/${sectionId}/reviews`, data)
+
+// data = { notes, due_date, status, resolved_by }
+export const updateReview = (reviewId, data) =>
+    API.put(`/reviews/${reviewId}`, data)
+
+export const deleteReview = (reviewId) =>
+    API.delete(`/reviews/${reviewId}`)
+
+//
+// FINANCIAL STATEMENT STARTER TEMPLATE
+//
+// Downloads a multi-sheet Excel workbook (Trial Balance + Balance Sheet +
+// Income Statement + Cash Flow Statement) for this engagement. Triggers a
+// browser download rather than returning JSON.
+export const downloadStatementTemplate = async (engagementId, engagementName = "engagement") => {
+    const res = await API.get(`/api/engagements/${engagementId}/statement-template`, {
+        responseType: "blob",
+    })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement("a")
+    link.href = url
+    link.setAttribute("download", `financial_statements_template_${engagementName}.xlsx`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+}
+
 export default API

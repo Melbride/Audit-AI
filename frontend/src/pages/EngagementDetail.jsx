@@ -1,5 +1,5 @@
 // React hooks
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 // API functions
 import {
@@ -9,7 +9,10 @@ import {
   updateSubmissionStatus,
   createSubmission,
   sendToClient,
+  downloadStatementTemplate,
 } from "../services/api";
+import SectionMilestones from "../components/SectionMilestones";
+import SectionReviews from "../components/SectionReviews";
 import "../styles/EngagementDetail.css";
 
 // Workflow approval stages, in order. A submission moves left-to-right
@@ -40,6 +43,8 @@ export default function EngagementDetail({ user }) {
   const [loading, setLoading] = useState(true);            // true while engagement data is being fetched
   const [actingOn, setActingOn] = useState(null);          // section_id currently processing an action (disables its buttons)
   const [noteDrafts, setNoteDrafts] = useState({});        // in-progress note text per section, keyed by section_id
+  const [expandedSection, setExpandedSection] = useState(null); // section_id currently showing milestones/reviews
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   // Load engagement data whenever the ID changes
   useEffect(() => {
@@ -360,6 +365,23 @@ export default function EngagementDetail({ user }) {
         >
           View Analysis
         </button>
+
+        <button
+          className="action-btn secondary"
+          disabled={downloadingTemplate}
+          onClick={async () => {
+            setDownloadingTemplate(true);
+            try {
+              await downloadStatementTemplate(engagementId, engagement.engagement_name);
+            } catch (err) {
+              alert("Failed to download template.");
+            } finally {
+              setDownloadingTemplate(false);
+            }
+          }}
+        >
+          {downloadingTemplate ? "Preparing…" : "Download Statement Template"}
+        </button>
       </div>
 
       {/* Allow Engagement Partner, Quality Reviewer, and Admin to send the final approved report to the client */}
@@ -406,6 +428,7 @@ export default function EngagementDetail({ user }) {
                 <th>Section</th>
                 <th>Status</th>
                 <th>Last Updated By</th>
+                <th>Milestones</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -420,7 +443,8 @@ export default function EngagementDetail({ user }) {
                   submission?.status || "Draft";
 
                 return (
-                  <tr key={section.section_id}>
+                  <Fragment key={section.section_id}>
+                  <tr>
 
                     {/* Audit section name */}
                     <td className="section-name">
@@ -450,6 +474,21 @@ export default function EngagementDetail({ user }) {
                       {submission?.submitted_by_name || "—"}
                     </td>
 
+                    {/* Toggle to expand/collapse this section's milestones + review log */}
+                    <td>
+                      <button
+                        className="action-btn secondary"
+                        style={{ padding: "4px 10px", fontSize: "11px" }}
+                        onClick={() =>
+                          setExpandedSection(
+                            expandedSection === section.section_id ? null : section.section_id
+                          )
+                        }
+                      >
+                        {expandedSection === section.section_id ? "Hide" : "View"}
+                      </button>
+                    </td>
+
                     {/* Render workflow action buttons based on the user's role */}
                     <td>
                       {renderActions(
@@ -459,6 +498,22 @@ export default function EngagementDetail({ user }) {
                     </td>
 
                   </tr>
+
+                  {/* Expanded panel: milestone tracker + review log for this section */}
+                  {expandedSection === section.section_id && (
+                    <tr>
+                      <td colSpan={5} style={{ background: "#F9FAFB", padding: "16px 20px" }}>
+                        <div style={{ marginBottom: "16px" }}>
+                          <p style={{ fontSize: "11px", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                            Milestones
+                          </p>
+                          <SectionMilestones sectionId={section.section_id} user={user} />
+                        </div>
+                        <SectionReviews sectionId={section.section_id} user={user} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
