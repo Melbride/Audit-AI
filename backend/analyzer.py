@@ -62,7 +62,7 @@ def calculate_breakdowns(df: pd.DataFrame, mapping: dict, max_unique_ratio: floa
 def calculate_monthly_trend(df: pd.DataFrame, mapping: dict) -> dict:
     """
     For every date column and every numeric column found, groups by month.
-    Returns empty dict if no date column or numeric column exists in this file.
+    Returns empty dict if no date column or numeric column exists in the file.
     """
     date_columns = get_columns_by_type(mapping, df, "date")
     numeric_columns = get_columns_by_type(mapping, df, "numeric")
@@ -198,6 +198,102 @@ Example output format:
         return []
 
 
+def generate_financial_ai_insights(
+    financial_statements: dict,
+    financial_ratios: dict,
+    financial_analytics: dict,
+    comparative_analytics: dict = None,
+    generic_analysis: dict = None,
+) -> list:
+    """
+    Generates AI insights from accounting-aware statement context.
+    The LLM receives calculated statements, ratios, and analytics only;
+    it does not calculate from raw data.
+    """
+    if not financial_statements or not financial_analytics:
+        generic_analysis = generic_analysis or {}
+        return generate_ai_insights(
+            generic_analysis.get("breakdowns", {}),
+            generic_analysis.get("monthly_trend", {}),
+            generic_analysis.get("anomalies", []),
+        )
+
+    prompt = f"""You are a financial insights assistant helping an audit firm understand classified financial statements.
+
+Here is the calculated accounting context for this client:
+
+Income Statement and Balance Sheet:
+{json.dumps(financial_statements, indent=2)}
+
+Financial ratios:
+{json.dumps(financial_ratios, indent=2)}
+
+Statement-aware analytics:
+{json.dumps(financial_analytics, indent=2)}
+
+Comparative analytics:
+{json.dumps(comparative_analytics or {}, indent=2)}
+
+Instructions:
+- Write 3-6 short, useful insights for an auditor
+- Use accounting language correctly: revenue, cost of sales, gross margin, operating expenses, net margin, assets, liabilities, equity, working capital
+- Explain causes when the numbers support them, for example margin pressure from cost of sales or leverage from liabilities
+- Mention exact figures or percentages from the provided data when helpful
+- Mention year-over-year or period movement only when comparative analytics is available
+- Do not invent prior-year movement, monthly movement, or drivers that are not in the data
+- Each insight needs a "type" (profitability, liquidity, solvency, margin, expense_mix, revenue_mix, comparative, or statement_check), a "severity" (high, medium, or info), and a "message" (one clear sentence)
+- Return ONLY a valid JSON array, no text before or after, no markdown
+
+Example output format:
+[
+  {{"type": "margin", "severity": "medium", "message": "Gross margin is 48.6%, with cost of sales consuming 51.4% of revenue."}},
+  {{"type": "solvency", "severity": "info", "message": "Debt to equity is 1.06, indicating liabilities are slightly higher than equity."}}
+]"""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a financial insights assistant for an audit firm. You only return valid JSON. No explanations, no markdown, no backticks."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.25,
+        max_tokens=1200,
+    )
+    raw = response.choices[0].message.content.strip()
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+    try:
+        insights = json.loads(raw)
+        if not isinstance(insights, list):
+            return []
+        return insights
+    except json.JSONDecodeError:
+        return []
+
+
+# Determine analysis scope
+def determine_analysis_scope(breakdowns: dict, monthly_trend: dict) -> str:
+    """
+    Reports whether meaningful financial analysis was possible for this file,
+    based on what the Financial Engine actually managed to calculate.
+    Does not attempt to classify revenue vs expense, purely reflects 
+    whether categorical breakdowns and/or time-based trends exist.
+    """
+    has_breakdowns = bool(breakdowns)
+    has_trend = bool(monthly_trend)
+
+    if has_breakdowns and has_trend:
+        return "full"
+    elif has_breakdowns or has_trend:
+        return "partial"
+    else:
+        return "undetermined"
 
 
 

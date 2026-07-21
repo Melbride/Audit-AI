@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { getClients, createClient, updateClient, deleteClient } from "../services/api";
 import "../styles/Clients.css";
 
 export default function Clients({ user }) {
+  const navigate = useNavigate();
   const [clients, setClients]             = useState([]);
   const [loading, setLoading]             = useState(true);
   const [showModal, setShowModal]         = useState(false);
@@ -213,6 +215,16 @@ export default function Clients({ user }) {
                     </button>
                     <button type="button" className="cl-btn-delete" onClick={() => handleDelete(selectedClient)}>
                       Delete
+                    </button>
+                    <button type="button" className="cl-btn-view" onClick={() => navigate(`/clients/${selectedClient.client_id}`)}>
+                      View
+                    </button>
+                  </div>
+                )}
+                {!canEdit && (
+                  <div className="cl-detail-actions">
+                    <button type="button" className="cl-btn-view" onClick={() => navigate(`/clients/${selectedClient.client_id}`)}>
+                      View
                     </button>
                   </div>
                 )}

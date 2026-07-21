@@ -1,15 +1,20 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-
 // AI pipeline pages
 import UploadPage from './pages/UploadPage'
 import MappingPage from './pages/MappingPage'
 import CleanPage from './pages/CleanPage'
 import AnalysisPage from './pages/AnalysisPage'
 import CorrectedResultsPage from './pages/CorrectedResultsPage'
+import TrialBalancePage from './pages/TrialBalancePage'
+import AccountMappingPage from './pages/AccountMappingPage'
 
 // App/management pages
 import Login from './pages/Login'
+import ResetPassword from './pages/password_reset'
+import PasswordResetDone from './pages/password_reset_done'
+import SetNewPassword from './pages/password_reset_confirm'
+import PasswordResetComplete from './pages/password_reset_complete'
 import Dashboard from './pages/Dashboard'
 import Users from './pages/Users'
 import LoginManagement from './pages/LoginManagement'
@@ -22,8 +27,9 @@ import AllFiles from './pages/AllFiles'
 import Reports from './pages/Reports'
 import ReportDetail from './pages/ReportDetail'
 import Layout from './pages/Layout'
+import ClientDetailsPage from './pages/ClientDetailsPage'
 import './App.css'
-
+import FinancialStatementsPage from './pages/FinancialStatementsPage'
 function RequireAuth({ user, children }) {
   if (!user) return <Navigate to="/login" replace />
   return children
@@ -61,6 +67,15 @@ function App() {
           element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLogin} />}
         />
 
+        {/* Password reset flow (no sidebar, no auth required) */}
+        <Route path="/password-reset" element={<ResetPassword />} />
+        <Route path="/password-reset/done" element={<PasswordResetDone />} />
+        <Route path="/password-reset/confirm/:token" element={<SetNewPassword />} />
+        <Route path="/password-reset/complete" element={<PasswordResetComplete />} />
+        <Route path="/clients/:clientId" element={<ClientDetailsPage />} />
+        <Route path="/trial-balance" element={<TrialBalancePage />} />
+        <Route path="/account-mapping" element={<AccountMappingPage />} />
+        <Route path="/financial-statements" element={<FinancialStatementsPage />} />
         {/* All authenticated pages (wrapped in Layout — persistent sidebar) */}
 
         {/* AI Pipeline pages */}
@@ -133,6 +148,16 @@ function App() {
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
                 <Dashboard user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/clients/:clientId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <ClientDetailsPage />
               </Layout>
             </RequireAuth>
           }

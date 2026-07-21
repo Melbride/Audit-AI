@@ -243,8 +243,18 @@ function CorrectedResultsPage() {
                             <span className="cr-success-text">Data is ready for analysis.</span>
                         )}
                     </div>
-                    <button className={`cr-action-btn ${currentResult.can_proceed ? 'cr-btn-go' : 'cr-btn-locked'}`} disabled={!currentResult.can_proceed} onClick={() => navigate('/analysis', { state: { cleanResult: currentResult, clientId, uploadResult } })}>
-                        Proceed to Analysis →
+                    <button
+                        className={`cr-action-btn ${currentResult.can_proceed ? 'cr-btn-go' : 'cr-btn-locked'}`}
+                        disabled={!currentResult.can_proceed}
+                        onClick={() => {
+                            const isLedgerFile = fileType === 'trial_balance' || fileType === 'general_ledger'
+                            const targetRoute = isLedgerFile ? '/trial-balance' : '/analysis'
+                            navigate(targetRoute, { state: { cleanResult: currentResult, clientId, uploadResult, fileType } })
+                        }}
+                    >
+                        {(fileType === 'trial_balance' || fileType === 'general_ledger')
+                            ? 'Proceed to Trial Balance Validation →'
+                            : 'Proceed to Analysis →'}
                     </button>
                 </div>
             </div>

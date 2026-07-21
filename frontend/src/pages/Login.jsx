@@ -54,14 +54,7 @@ export default function Login({ onLogin }) {
     setError("");
     try {
       const res = await requestPasswordReset(resetEmail);
-      const data = res.data;
-      if (data.token) {
-        setResetToken(data.token);
-        setMessage("Token generated. Enter it below with your new password.");
-        setView("reset");
-      } else {
-        setError(data.detail || "Email not found");
-      }
+      setMessage(res.data.message || "Reset link sent. Check your email.");
     } catch (err) {
       setError(err.response?.data?.detail || "Could not connect to server.");
     }

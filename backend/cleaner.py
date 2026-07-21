@@ -395,31 +395,61 @@ def check_near_duplicate_values(df: pd.DataFrame, mapping: dict, issues: list) -
                 if val_a in already_flagged or val_b in already_flagged:
                     continue
 
-                # Skip pairs that differ by a trailing number — these are 
-                # usually distinct sequential items (invoice 1 vs 2), not 
-                # spelling variants of the same thing
+                # Skip pairs that differ by a trailing number
                 base_a = re.sub(r'\d+$', '', val_a).strip()
                 base_b = re.sub(r'\d+$', '', val_b).strip()
                 if base_a == base_b and val_a != val_b:
                     continue
 
+                # Skip pairs where one value fully contains the other
+                if val_a.lower() in val_b.lower() or val_b.lower() in val_a.lower():
+                    continue
+
                 similarity = SequenceMatcher(None, val_a.lower(), val_b.lower()).ratio()
-                if SIMILARITY_THRESHOLD <= similarity < 1.0:
-                    issues.append({
-                        "row": "N/A",
-                        "column": col,
-                        "row_index": "N/A",
-                        "original_value": f"{val_a} / {val_b}",
-                        "issue": (
-                            f"Possible duplicate values in '{col}': '{val_a}' and '{val_b}' "
-                            f"look like they may refer to the same thing but are spelled "
-                            f"differently. Consider standardising to one format so they aren't "
-                            f"treated as separate entries in totals and breakdowns."
-                        ),
-                        "severity": "medium"
-                    })
-                    already_flagged.add(val_a)
-                    already_flagged.add(val_b)
+                if not (SIMILARITY_THRESHOLD <= similarity < 1.0):
+                    continue
+
+                # Character similarity is high — but now check whether the
+                # DIFFERING tokens are themselves meaningful distinct words.
+                # If they are, the two values are intentionally different entries
+                # that just share a common suffix/prefix (e.g. "Meru National
+                # Polytechnic" vs "Nyeri National Polytechnic") and should NOT
+                # be flagged. Only flag when the differing part looks like a
+                # typo, abbreviation, or minor formatting variation.
+                tokens_a = set(val_a.lower().split())
+                tokens_b = set(val_b.lower().split())
+                only_in_a = tokens_a - tokens_b
+                only_in_b = tokens_b - tokens_a
+                differing = only_in_a | only_in_b
+                # If every differing token is a real word (4+ chars) and the
+                # two sides each contribute at least one unique token, the
+                # values are genuinely different — skip.
+                if differing and all(len(t) >= 4 for t in differing) and only_in_a and only_in_b:
+                    # Extra check: the unique tokens on each side should not
+                    # themselves be near-duplicates of each other (which would
+                    # mean it really is a typo like "Nairobi" vs "Nairob").
+                    token_pairs_are_typos = any(
+                        SequenceMatcher(None, ta, tb).ratio() >= 0.85
+                        for ta in only_in_a for tb in only_in_b
+                    )
+                    if not token_pairs_are_typos:
+                        continue
+
+                issues.append({
+                    "row": "N/A",
+                    "column": col,
+                    "row_index": "N/A",
+                    "original_value": f"{val_a} / {val_b}",
+                    "issue": (
+                        f"Possible duplicate values in '{col}': '{val_a}' and '{val_b}' "
+                        f"look like they may refer to the same thing but are spelled "
+                        f"differently. Consider standardising to one format so they aren't "
+                        f"treated as separate entries in totals and breakdowns."
+                    ),
+                    "severity": "medium"
+                })
+                already_flagged.add(val_a)
+                already_flagged.add(val_b)
     return None
 
 # Function to check if any date column appears out of order relative to another date column in the same row
@@ -433,6 +463,15 @@ def check_date_order(df: pd.DataFrame, mapping: dict, issues: list) -> None:
     ]
     if len(date_cols) < 2:
         return
+
+    # Build a lookup of which (row, col) pairs had an ambiguous raw value so
+    # we can give a more precise message when the order violation is caused by
+    # a wrong dayfirst guess rather than a genuine data entry error.
+    ambiguous_cells = set()
+    for issue in issues:
+        if "Ambiguous date" in issue.get("issue", "") and issue.get("row_index") != "N/A":
+            ambiguous_cells.add((issue["row_index"], issue["column"]))
+
     for idx in df.index:
         parsed = []
         for col in date_cols:
@@ -440,25 +479,50 @@ def check_date_order(df: pd.DataFrame, mapping: dict, issues: list) -> None:
                 val_str = str(df.at[idx, col]).strip()
                 if val_str == "" or val_str.lower() == "nan":
                     continue
-                # Avoid UserWarning for ISO strings and handle NaT to prevent 500 error
                 dayfirst = not (len(val_str) >= 10 and val_str[4] == '-' and val_str[7] == '-')
                 dt = pd.to_datetime(val_str, dayfirst=dayfirst, errors='coerce')
                 if pd.notna(dt):
                     parsed.append((col, dt))
             except Exception:
                 pass
-        # Flag any pair where the second date is before the first by more than 1 day to avoid same-day false positives
+
         for i in range(len(parsed) - 1):
             col_a, date_a = parsed[i]
             col_b, date_b = parsed[i + 1]
-            if (date_a - date_b).days > 1:
-                # NOTE: the flag is attached to col_b (it has to be attached to *some*
-                # column for row-matching), but the actual error could be in EITHER
-                # column, col_b might be correct and col_a wrong (e.g. col_a was an
-                # ambiguous string like 01/05 parsed as 1 May instead of 5 Jan). The
-                # message below deliberately names both dates as suspects instead of
-                # singling out col_b, since blaming col_b misled auditors into "fixing"
-                # the column that was already correct.
+            diff_days = (date_a - date_b).days
+            # Only flag when the gap is large enough to be impossible in practice.
+            # A processing date 1-3 days before a transaction date could be a
+            # timezone or batch-processing quirk — not worth flagging. But months
+            # apart is never legitimate and is almost always a parse error.
+            if diff_days <= 7:
+                continue
+
+            # Check if either cell was flagged as ambiguous — if so, the order
+            # violation is almost certainly a wrong dayfirst parse, not a data
+            # entry error. Point the auditor at the specific ambiguous cell.
+            ambiguous_col = None
+            if (idx, col_a) in ambiguous_cells:
+                ambiguous_col = col_a
+            elif (idx, col_b) in ambiguous_cells:
+                ambiguous_col = col_b
+
+            if ambiguous_col:
+                issues.append({
+                    "row": int(idx) + 2,
+                    "column": ambiguous_col,
+                    "row_index": idx,
+                    "original_value": str(df.at[idx, ambiguous_col]),
+                    "issue": (
+                        f"Date order issue caused by ambiguous date in '{ambiguous_col}' "
+                        f"({df.at[idx, ambiguous_col]}) — it was parsed as DD/MM/YYYY but "
+                        f"the resulting date puts it out of order with '{col_a if ambiguous_col == col_b else col_b}' "
+                        f"({df.at[idx, col_a if ambiguous_col == col_b else col_b]}). "
+                        f"Correct '{ambiguous_col}' to an unambiguous format (e.g. '7 Jan 2024') "
+                        f"to resolve this."
+                    ),
+                    "severity": "medium"
+                })
+            else:
                 issues.append({
                     "row": int(idx) + 2,
                     "column": col_b,
@@ -535,6 +599,8 @@ def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict
     for original_col, col in confirmed_columns:
         if col == "_is_duplicate":
             continue
+        if col in ("debit", "credit"):
+            continue
         rate = fill_rates.get(original_col, 1.0)  # Default to 1.0 (fully filled) if rate unknown
         if rate < 0.5:
             # Sparse column, flag once with fill rate context instead of flooding the report
@@ -575,6 +641,9 @@ def handle_duplicates(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataF
     Does not remove any rows, auditor decides.
     """
     # Initialize marker column to avoid KeyError in suspicious check if no exact duplicates exist
+    # Drop any pre-existing _is_duplicate column from the raw data before adding our own marker
+    if "_is_duplicate" in df.columns:
+        df = df.drop(columns=["_is_duplicate"])
     df["_is_duplicate"] = df.duplicated(keep="first")
 
     # Find all rows that are completely identical to another row
