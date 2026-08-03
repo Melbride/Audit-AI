@@ -242,6 +242,11 @@ def clean_amounts(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame
         and info.get("mapped_to") in df.columns
     ]
     for col in amount_columns:
+        # Amount columns may be read as a pandas string dtype from Excel/CSV.
+        # Convert to object before assigning float values so pandas does not reject them.
+        if pd.api.types.is_string_dtype(df[col].dtype):
+            df[col] = df[col].astype(object)
+
         for idx, value in df[col].items():
             # Skip empty values.
             if pd.isna(value) or str(value).strip() == "":

@@ -1903,6 +1903,39 @@ def update_user(user_id: int, u: UserUpdate, db=Depends(get_db)):
     db.commit()
     return {"message": "User updated"}
 
+# Reset a user's password
+@app.put("/users/{user_id}/reset-password")
+def reset_user_password(user_id: int, payload: dict, db=Depends(get_db)):
+    new_password = payload.get("new_password")
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    cursor = db.cursor()
+    hashed = hash_password(new_password)
+    cursor.execute("UPDATE users SET password_hash = %s, failed_attempts = 0 WHERE user_id = %s", (hashed, user_id))
+    db.commit()
+    return {"message": "Password reset successful"}
+
+# Lock or unlock a user's account
+@app.put("/users/{user_id}/login-lock")
+def set_user_login_lock(user_id: int, payload: dict, db=Depends(get_db)):
+    locked = payload.get("locked")
+    if locked is None:
+        raise HTTPException(status_code=400, detail="Missing locked flag")
+    cursor = db.cursor()
+    cursor.execute("UPDATE users SET login_locked = %s WHERE user_id = %s", (1 if locked else 0, user_id))
+    db.commit()
+    return {"message": "Login access updated", "login_locked": bool(locked)}
+
+# Get a user's login history
+@app.get("/users/{user_id}/login-history")
+def get_user_login_history(user_id: int, db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+    cursor.execute(
+        "SELECT id, timestamp, ip_address, device, status FROM login_history WHERE user_id = %s ORDER BY timestamp DESC",
+        (user_id,)
+    )
+    return cursor.fetchall()
+
 # Delete a user
 @app.delete("/users/{user_id}")
 def delete_user(user_id: int, db=Depends(get_db)):
@@ -2219,7 +2252,7 @@ def send_engagement_to_client(
 
     progress_by_id = fetch_engagement_progress(db, [engagement_id])
     apply_display_status(engagement, progress_by_id.get(engagement_id, {}))
-    if engagement["display_status"] != "Under Review":
+    if engagement["display_status"] not in {"Under Review", "Completed"}:
         raise HTTPException(
             status_code=400,
             detail=(
