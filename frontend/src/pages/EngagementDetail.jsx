@@ -142,13 +142,13 @@ export default function EngagementDetail({ user }) {
           {engagement.financial_year || "—"}
         </p>
 
-        <button
+        {/* <button
           className="action-btn secondary"
           onClick={() => navigate(`/analysis/${engagementId}`)}
         >
           View Analysis
-        </button>
-
+        </button> */}
+{/* 
         <button
           className="action-btn secondary"
           disabled={downloadingTemplate}
@@ -164,7 +164,7 @@ export default function EngagementDetail({ user }) {
           }}
         >
           {downloadingTemplate ? "Preparing…" : "Download Statement Template"}
-        </button>
+        </button> */}
       </div>
 
       {/* Allow Engagement Partner, Quality Reviewer, and Admin to send the final approved report to the client */}
@@ -268,7 +268,7 @@ export default function EngagementDetail({ user }) {
                           className="action-btn secondary"
                           onClick={() => navigate(`/submissions/${submission.submission_id}/review`)}
                         >
-                          📋 Review Submission
+                          Review Submission
                         </button>
                       ) : (
                         <span className="workflow-text">Not yet submitted</span>

@@ -100,7 +100,7 @@ export default function MyWorkspaces({ user }) {
                       className="action-btn secondary"
                       onClick={() => navigate(`/workspace/${ws.workspace_id}`)}
                     >
-                      Open →
+                      Open 
                     </button>
                   </td>
                 </tr>
