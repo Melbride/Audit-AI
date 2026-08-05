@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { cleanFile, submitCorrectedExcel } from '../services/api'
+import { cleanFile, submitCorrectedExcel, getFilePreview } from '../services/api'
 import '../styles/UploadPage.css'
 import '../styles/CleanPage.css'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -10,7 +10,12 @@ function CleanPage( ) {
     const location = useLocation()
     const navigate = useNavigate()
     const { uploadResult, clientId, fileType, cleanResult: resumedCleanResult } = location.state || {}
+    
+    const fileId = location.state?.fileId || localStorage.getItem('pendingFileId') || uploadResult?.file_id
+    const activeClientId = clientId || location.state?.clientId || localStorage.getItem('pendingClientId')
+
     const [currentUpload, setCurrentUpload] = useState(uploadResult)
+    const [loadingFile, setLoadingFile] = useState(false)
     const [cleaning, setCleaning] = useState(false)
     const [cleanResult, setCleanResult] = useState(resumedCleanResult || null)
     const [error, setError] = useState(null)
@@ -18,6 +23,24 @@ function CleanPage( ) {
     const [showDownloadMessage, setShowDownloadMessage] = useState(false) // New state for temporary message
     const [uploadingCorrected, setUploadingCorrected] = useState(false)
     const correctedFileInputRef = useRef(null)
+
+    // Load file metadata if coming directly from workspace or notification without full uploadResult object
+    useEffect(() => {
+        if (!currentUpload && fileId && activeClientId) {
+            setLoadingFile(true)
+            getFilePreview(fileId, activeClientId)
+                .then((res) => {
+                    const data = res.data || res
+                    setCurrentUpload({
+                        file_id: fileId,
+                        filename: data.filename,
+                        client_id: activeClientId
+                    })
+                })
+                .catch((err) => console.error("Failed to load file preview for cleaning", err))
+                .finally(() => setLoadingFile(false))
+        }
+    }, [fileId, activeClientId, currentUpload])
 
     // Add a loading spinner to the "Run Cleaning Engine" button
     const handleClean = async () => {
@@ -94,12 +117,19 @@ function CleanPage( ) {
     const previewRows = allRows.slice(0, 5)
     const totalRows = allRows.length
     const flaggedRows = cleanResult ? new Set((report?.issues || []).filter(i => i.row_index !== 'N/A').map(i => Number(i.row_index))) : new Set()
-    // Update the current upload state when the component mounts
-    if (!uploadResult) {
+    if (loadingFile) {
         return (
             <div className="page">
-                <p className="error">No file found. Please go back and upload a file first.</p>
-                <button className="btn" onClick={() => navigate('/')}>Go Back</button>
+                <p className="loading">Loading file for data cleaning...</p>
+            </div>
+        )
+    }
+
+    if (!currentUpload) {
+        return (
+            <div className="page">
+                <p className="error">No file found for cleaning. Please check your workspace or upload a file first.</p>
+                <button className="btn" onClick={() => navigate('/engagements')}>Go to Engagements</button>
             </div>
         )
     }

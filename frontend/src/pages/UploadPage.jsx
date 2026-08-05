@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { uploadFile } from '../services/api'
+import { uploadFile, submitFile } from '../services/api'
 import '../styles/UploadPage.css'
 import axios from 'axios'
 
@@ -15,14 +15,39 @@ export default function UploadPage() {
     const [clients, setClients] = useState([]) 
     const [clientSearch, setClientSearch] = useState('') 
     const [selectedClient, setSelectedClient] = useState(null) 
-    const [showDropdown, setShowDropdown] = useState(false) 
+    const [showDropdown, setShowDropdown] = useState(false)
+    const [submitting, setSubmitting] = useState(false)
+    const [submitSuccess, setSubmitSuccess] = useState(false) 
+    const [engagements, setEngagements] = useState([])
+    const [selectedEngagement, setSelectedEngagement] = useState(null)
+    const [sections, setSections] = useState([])
+    const [selectedSectionId, setSelectedSectionId] = useState('')
+
+    const clientEngagements = selectedClient
+        ? engagements.filter(e => e.client_id === selectedClient.client_id)
+        : [] 
 
     // Load the client list once on mount
     useEffect(() => {
         axios.get('http://localhost:8000/clients')
             .then(res => setClients(res.data))
             .catch(err => console.error('Clients load failed', err))
+        axios.get('http://localhost:8000/engagements')
+            .then(res => setEngagements(res.data))
+            .catch(err => console.error('Engagements load failed', err))
     }, [])
+
+    // Load sections whenever an engagement is picked
+    useEffect(() => {
+        if (!selectedEngagement) {
+            setSections([])
+            setSelectedSectionId('')
+            return
+        }
+        axios.get(`http://localhost:8000/engagements/${selectedEngagement.engagement_id}/sections`)
+            .then(res => setSections(res.data))
+            .catch(err => console.error('Sections load failed', err))
+    }, [selectedEngagement])
 
     // Handles a file dropped onto the dropzone
     const onDropFile = (e) => {
@@ -44,19 +69,49 @@ export default function UploadPage() {
     
     // Sends the staged file + selected client to the backend
     const handleUpload = async () => {
-        if (!selectedClient || !file) return
+        if (!selectedClient || !file || !selectedSectionId) return
         setError('')
         setUploading(true)
         try {
             const fd = new FormData()
             fd.append('file', file)
             fd.append('client_id', selectedClient.client_id)
+            fd.append('section_id', selectedSectionId)
             const res = await uploadFile(fd)
             setUploadResult(res.data)
         } catch (err) {
             setError(err.response?.data?.detail || 'Upload failed.')
         } finally {
             setUploading(false)
+        }
+    }
+    
+    // Handle file submission to auditor
+    const handleSubmit = async () => {
+        if (!selectedClient || !uploadResult) {
+            
+            return
+        }
+        setSubmitting(true)
+        try {
+            const user = JSON.parse(localStorage.getItem('user'))
+            console.log('DEBUG: Submitting file', { 
+                file_id: uploadResult.file_id, 
+                client_id: selectedClient.client_id, 
+                submitted_by: user.user_id 
+            })
+            const fd = new FormData()
+            fd.append('file_id', uploadResult.file_id)
+            fd.append('client_id', selectedClient.client_id)
+            fd.append('submitted_by', user.user_id)
+            const res = await submitFile(fd)
+            
+            setSubmitSuccess(true)
+        } catch (err) {
+            
+            setError(err.response?.data?.detail || 'Submission failed.')
+        } finally {
+            setSubmitting(false)
         }
     }
     
@@ -77,6 +132,8 @@ export default function UploadPage() {
                             onChange={(e) => {
                                 setClientSearch(e.target.value)
                                 setSelectedClient(null)
+                                setSelectedEngagement(null)
+                                setSelectedSectionId('')
                                 setShowDropdown(true)
                             }}
                             onFocus={() => setShowDropdown(true)}
@@ -94,6 +151,8 @@ export default function UploadPage() {
                                             onMouseDown={() => {
                                                 setSelectedClient(c)
                                                 setClientSearch(c.company_name)
+                                                setSelectedEngagement(null)
+                                                setSelectedSectionId('')
                                                 setShowDropdown(false)
                                             }}
                                         >
@@ -110,6 +169,46 @@ export default function UploadPage() {
                             </p>
                         )}
                     </div>
+
+                    {selectedClient && (
+                        <div className="field">
+                            <label className="label">Engagement</label>
+                            <select
+                                className="input"
+                                value={selectedEngagement?.engagement_id || ''}
+                                onChange={(e) => {
+                                    const eng = clientEngagements.find(x => String(x.engagement_id) === e.target.value)
+                                    setSelectedEngagement(eng || null)
+                                    setSelectedSectionId('')
+                                }}
+                            >
+                                <option value="">-- Select engagement --</option>
+                                {clientEngagements.map(eng => (
+                                    <option key={eng.engagement_id} value={eng.engagement_id}>
+                                        {eng.engagement_name} (FY {eng.financial_year})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
+                    {selectedEngagement && (
+                        <div className="field">
+                            <label className="label">Audit Section</label>
+                            <select
+                                className="input"
+                                value={selectedSectionId}
+                                onChange={(e) => setSelectedSectionId(e.target.value)}
+                            >
+                                <option value="">-- Select section this file belongs to --</option>
+                                {sections.map(sec => (
+                                    <option key={sec.section_id} value={sec.section_id}>
+                                        {sec.section_name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
                     {/* Shows staged file name, or the dropzone if no file picked yet */}
                     {file ? (
@@ -144,7 +243,7 @@ export default function UploadPage() {
                     <p className="formats">Excel (.xlsx, .xls), CSV, PDF, DOCX - Max 50MB</p>
                     {error && <div className="error">{error}</div>}
                     {/* Disabled until both a client and a file are selected */}
-                    <button className="btn" onClick={handleUpload} disabled={uploading || !selectedClient || !file}>
+                    <button className="btn" onClick={handleUpload} disabled={uploading || !selectedClient || !file || !selectedSectionId}>
                         {uploading ? 'Uploading...' : 'Upload File'}
                     </button>
                 </div>
@@ -199,10 +298,16 @@ export default function UploadPage() {
                             </tbody>
                         </table>
                     </div>
-                    {/* Moves to the mapping page, carrying the upload result and client id forward */}
-                    <button className="btn" onClick={() => navigate('/mapping', { state: { uploadResult, clientId: selectedClient?.client_id } })} style={{ marginTop: '24px' }}>
-                        Detect Columns
-                    </button>
+                    {/* Submit button for accountants to send file to auditor */}
+                    {!submitSuccess ? (
+                        <button className="btn" onClick={handleSubmit} disabled={submitting} style={{ marginTop: '24px' }}>
+                            {submitting ? 'Submitting...' : 'Submit to Auditor'}
+                        </button>
+                    ) : (
+                        <div className="success" style={{ marginTop: '24px' }}>
+                            File submitted successfully! The assigned auditor has been notified.
+                        </div>
+                    )}
                 </div>
             )}
         </div>

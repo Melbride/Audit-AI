@@ -212,6 +212,11 @@ def init_db():
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE submissions ADD COLUMN current_stage VARCHAR(100) DEFAULT 'Accountant'")
 
+    # Add file_id to submissions table for file-scoped submissions
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'submissions' AND column_name = 'file_id'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN file_id VARCHAR(255) NULL")
+
     # Notifications table. Stores in-app alerts sent to users when submissions are ready for review.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notifications (
@@ -220,9 +225,24 @@ def init_db():
             message TEXT NOT NULL,
             type VARCHAR(100) DEFAULT 'engagement_alert',
             is_read BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            file_id VARCHAR(255),
+            client_id INT
         )
     """)
+
+    # Add file_id and client_id columns if they don't exist (for existing databases)
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'notifications' AND column_name = 'file_id'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE notifications ADD COLUMN file_id VARCHAR(255)")
+
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'notifications' AND column_name = 'client_id'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE notifications ADD COLUMN client_id INT")
+
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'notifications' AND column_name = 'engagement_id'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE notifications ADD COLUMN engagement_id INT")
 
     # Uploads table. Tracks every file uploaded per client for audit trail.
     # file_id is a UUID generated at upload time and must be unique.
@@ -254,6 +274,9 @@ def init_db():
     cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'upload_date'", (DB_CONFIG["database"],))
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE uploads ADD COLUMN upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'section_id'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE uploads ADD COLUMN section_id INT NULL")
 
     # Auditor acknowledgments for issues that are valid as-is.
     # Stores full issue detail columns so each acknowledgment is self-describing without needing a JOIN.
@@ -394,6 +417,65 @@ def init_db():
         )
     """)
 
+    # Saved analyses table (was missing entirely — save_analysis()/get_saved_analyses()
+    # below already query this table, but nothing ever created it, hence the
+    # "Table 'ai_audit.saved_analyses' doesn't exist" error. client_id is VARCHAR to
+    # match how it's passed everywhere else in this file (uploads, mappings, etc.),
+    # so no FK to clients.client_id (which is INT) — same pattern as the uploads table.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS saved_analyses (
+            analysis_id     INT AUTO_INCREMENT PRIMARY KEY,
+            user_id         INT NOT NULL,
+            client_id       VARCHAR(255) NOT NULL,
+            engagement_id   INT NULL,
+            file_id         VARCHAR(255) NOT NULL,
+            file_type       VARCHAR(100) NOT NULL DEFAULT 'general',
+            analysis_data   LONGTEXT,
+            insights_data   LONGTEXT,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            FOREIGN KEY (engagement_id) REFERENCES engagements(engagement_id)
+        )
+    """)
+
+    # Auditor workspaces table. Provides dedicated personal workspace view per auditor, engagement, and section.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS auditor_workspaces (
+            workspace_id    INT AUTO_INCREMENT PRIMARY KEY,
+            user_id         INT NOT NULL,
+            engagement_id   INT NOT NULL,
+            section_id      INT NULL,
+            file_id         VARCHAR(255) NULL,
+            status          VARCHAR(50) DEFAULT 'active',
+            notes           TEXT,
+            progress_data   LONGTEXT,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_user_eng_sec (user_id, engagement_id, section_id),
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            FOREIGN KEY (engagement_id) REFERENCES engagements(engagement_id),
+            FOREIGN KEY (section_id) REFERENCES audit_sections(section_id)
+        )
+    """)
+
+    # Workflow stages table. Tracks the current stage of the audit workflow for each file.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_stages (
+            id                          INT AUTO_INCREMENT PRIMARY KEY,
+            file_id                     VARCHAR(255) NOT NULL,
+            client_id                   VARCHAR(255) NOT NULL,
+            file_type                   VARCHAR(100) NOT NULL DEFAULT 'general',
+            current_stage               VARCHAR(100) DEFAULT 'clean',
+            tb_validation_completed     TINYINT(1) DEFAULT 0,
+            account_mapping_completed   TINYINT(1) DEFAULT 0,
+            financial_analysis_completed TINYINT(1) DEFAULT 0,
+            created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_workflow_stage (file_id, client_id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -402,13 +484,22 @@ def init_db():
 # Mapping is a dict of { "original_column": { "mapped_to": "amount", "field_type": "numeric" } }
 # Deletes old mappings for this client+file_type first, then re-inserts — this is intentional so
 # removed columns don't linger from a previous mapping round.
-def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: str = None):
+def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: str = None, fingerprint: str = None):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM column_mappings WHERE client_id = %s AND file_type = %s",
-        (client_id, file_type)
-    )
+    
+    # Use fingerprint for deletion if provided, otherwise fall back to file_type
+    if fingerprint:
+        cursor.execute(
+            "DELETE FROM column_mappings WHERE client_id = %s AND fingerprint = %s",
+            (client_id, fingerprint)
+        )
+    else:
+        cursor.execute(
+            "DELETE FROM column_mappings WHERE client_id = %s AND file_type = %s",
+            (client_id, file_type)
+        )
+        
     for original_column, info in mapping.items():
         # Handle both old format (string) and new format (dict) for backwards compatibility
         if isinstance(info, dict):
@@ -421,10 +512,14 @@ def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: st
             field_type       = "unknown"
             reviewed_unknown = 0
             required         = 1
+        
+        # Use fingerprint if provided, otherwise use file_type as fallback
+        effective_fingerprint = fingerprint if fingerprint else f"{file_type}_default"
+        
         cursor.execute("""
             INSERT INTO column_mappings
-                (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by, updated_at, fingerprint)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
             ON DUPLICATE KEY UPDATE
                 mapped_to        = VALUES(mapped_to),
                 field_type       = VALUES(field_type),
@@ -432,7 +527,7 @@ def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: st
                 required         = VALUES(required),
                 confirmed_by     = VALUES(confirmed_by),
                 updated_at       = CURRENT_TIMESTAMP
-        """, (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by))
+        """, (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by, effective_fingerprint))
     conn.commit()
     conn.close()
 
@@ -520,19 +615,27 @@ def get_fingerprint(client_id: str, fingerprint: str, file_type: str = "general"
         conn.close()
 
 # Retrieve the saved column mapping for a client and file type.
-def get_mapping(client_id: str, file_type: str = "general") -> dict:
+def get_mapping(client_id: str, file_type: str = "general", fingerprint: str = None) -> dict:
     """
-    Retrieve the saved column mapping for a client and file type.
+    Retrieve the saved column mapping for a client and file type/fingerprint.
     Returns a dict of { "original_column": { "mapped_to": ..., "field_type": ..., "reviewed_unknown": ..., "required": ... } }
     Returns empty dict if no mapping has been saved for this client yet.
     """
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT original_column, mapped_to, field_type, reviewed_unknown, required
-        FROM column_mappings
-        WHERE client_id = %s AND file_type = %s
-    """, (client_id, file_type))
+    
+    if fingerprint:
+        cursor.execute("""
+            SELECT original_column, mapped_to, field_type, reviewed_unknown, required
+            FROM column_mappings
+            WHERE client_id = %s AND fingerprint = %s
+        """, (client_id, fingerprint))
+    else:
+        cursor.execute("""
+            SELECT original_column, mapped_to, field_type, reviewed_unknown, required
+            FROM column_mappings
+            WHERE client_id = %s AND file_type = %s
+        """, (client_id, file_type))
     rows = cursor.fetchall()
     conn.close()
     if not rows:
@@ -550,12 +653,12 @@ def get_mapping(client_id: str, file_type: str = "general") -> dict:
 
 # Save an upload record to the database after a file is successfully uploaded.
 # ON DUPLICATE KEY UPDATE prevents duplicate records if the same file_id is uploaded twice.
-def save_upload(file_id: str, client_id: str, filename: str, file_type: str, rows: int):
+def save_upload(file_id: str, client_id: str, filename: str, file_type: str, rows: int, section_id: int = None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO uploads (file_id, client_id, filename, file_type, row_count) VALUES (%s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE file_id = file_id",
-        (file_id, client_id, filename, file_type, rows)
+        "INSERT INTO uploads (file_id, client_id, filename, file_type, row_count, section_id) VALUES (%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE file_id = file_id",
+        (file_id, client_id, filename, file_type, rows, section_id)
     )
     conn.commit()
     conn.close()
@@ -799,3 +902,492 @@ def get_cleaned_file_data(file_id: str, client_id: str, file_type: str):
         return None
     row["cleaned_data"] = json.loads(row["cleaned_data"])
     return row
+
+# Save a financial analysis result to the database
+def save_analysis(user_id: int, client_id: str, engagement_id: int, file_id: str, file_type: str, analysis_data: dict, insights_data: list = None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    analysis_json = json.dumps(analysis_data) if analysis_data else None
+    insights_json = json.dumps(insights_data) if insights_data else None
+    
+    cursor.execute("""
+        INSERT INTO saved_analyses (user_id, client_id, engagement_id, file_id, file_type, analysis_data, insights_data)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """, (user_id, client_id, engagement_id, file_id, file_type, analysis_json, insights_json))
+    
+    conn.commit()
+    conn.close()
+    return cursor.lastrowid
+
+# Get all saved analyses for a user, most recent first
+def get_saved_analyses(user_id: int) -> list:
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sa.*, c.company_name, e.engagement_name
+        FROM saved_analyses sa
+        LEFT JOIN clients c ON sa.client_id = c.client_id
+        LEFT JOIN engagements e ON sa.engagement_id = e.engagement_id
+        WHERE sa.user_id = %s
+        ORDER BY sa.created_at DESC
+    """, (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # Parse JSON fields
+    for row in rows:
+        if row.get('analysis_data'):
+            row['analysis_data'] = json.loads(row['analysis_data'])
+        if row.get('insights_data'):
+            row['insights_data'] = json.loads(row['insights_data'])
+    
+    return rows
+
+# Get all saved analyses for an engagement, most recent first — this is
+# team-scoped rather than user-scoped: every snapshot saved by anyone for
+# this engagement is returned, along with who saved it (saved_by_name), so
+# the caller can group by file_id and show a per-file history with
+# attribution ("who changed what, and when").
+def get_saved_analyses_for_engagement(engagement_id: int) -> list:
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sa.*, c.company_name, e.engagement_name, u.full_name AS saved_by_name
+        FROM saved_analyses sa
+        LEFT JOIN clients c ON sa.client_id = c.client_id
+        LEFT JOIN engagements e ON sa.engagement_id = e.engagement_id
+        LEFT JOIN users u ON sa.user_id = u.user_id
+        WHERE sa.engagement_id = %s
+        ORDER BY sa.file_id, sa.created_at DESC
+    """, (engagement_id,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    for row in rows:
+        if row.get('analysis_data'):
+            row['analysis_data'] = json.loads(row['analysis_data'])
+        if row.get('insights_data'):
+            row['insights_data'] = json.loads(row['insights_data'])
+
+    return rows
+
+# Get saved analyses for a specific engagement AND specific file — this is
+# what an auditor needs when working on a particular file within an engagement.
+# Returns all analysis snapshots for that file, with attribution showing who
+# saved each one and when, so they can see the history for just that file.
+# Matches analyses saved for this specific engagement OR analyses saved without
+# an engagement (for backward compatibility).
+def get_saved_analyses_for_file(engagement_id: int, file_id: str) -> list:
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sa.*, c.company_name, e.engagement_name, u.full_name AS saved_by_name
+        FROM saved_analyses sa
+        LEFT JOIN clients c ON sa.client_id = c.client_id
+        LEFT JOIN engagements e ON sa.engagement_id = e.engagement_id
+        LEFT JOIN users u ON sa.user_id = u.user_id
+        WHERE sa.file_id = %s AND (sa.engagement_id = %s OR sa.engagement_id IS NULL)
+        ORDER BY sa.created_at DESC
+    """, (file_id, engagement_id))
+    rows = cursor.fetchall()
+    conn.close()
+
+    for row in rows:
+        if row.get('analysis_data'):
+            row['analysis_data'] = json.loads(row['analysis_data'])
+        if row.get('insights_data'):
+            row['insights_data'] = json.loads(row['insights_data'])
+
+    return rows
+
+
+# Get a specific saved analysis by ID
+def get_saved_analysis(analysis_id: int):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sa.*, c.company_name, e.engagement_name
+        FROM saved_analyses sa
+        LEFT JOIN clients c ON sa.client_id = c.client_id
+        LEFT JOIN engagements e ON sa.engagement_id = e.engagement_id
+        WHERE sa.analysis_id = %s
+    """, (analysis_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        if row.get('analysis_data'):
+            row['analysis_data'] = json.loads(row['analysis_data'])
+        if row.get('insights_data'):
+            row['insights_data'] = json.loads(row['insights_data'])
+    
+    return row
+
+# Delete a saved analysis
+def delete_saved_analysis(analysis_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM saved_analyses WHERE analysis_id = %s", (analysis_id,))
+    conn.commit()
+    conn.close()
+
+
+# Workflow stages helper functions
+def get_workflow_stage(file_id: str, client_id: str, file_type: str = "general") -> dict:
+    """
+    Get the current workflow stage for a file.
+    Returns None if no workflow record exists.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT current_stage, tb_validation_completed, account_mapping_completed, financial_analysis_completed
+        FROM workflow_stages
+        WHERE file_id = %s AND client_id = %s
+    """, (file_id, client_id))
+    result = cursor.fetchone()
+    conn.close()
+    return result
+
+def update_workflow_stage(file_id: str, client_id: str, file_type: str, stage: str):
+    """
+    Update the current workflow stage for a file.
+    Creates record if it doesn't exist.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO workflow_stages (file_id, client_id, file_type, current_stage)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE file_type = %s, current_stage = %s, updated_at = CURRENT_TIMESTAMP
+    """, (file_id, client_id, file_type, stage, file_type, stage))
+    conn.commit()
+    conn.close()
+
+def mark_workflow_step_completed(file_id: str, client_id: str, file_type: str, step: str):
+    """
+    Mark a specific workflow step as completed.
+    step can be: 'tb_validation', 'account_mapping', 'financial_analysis'
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    if step == 'tb_validation':
+        cursor.execute("""
+            INSERT INTO workflow_stages (file_id, client_id, file_type, tb_validation_completed)
+            VALUES (%s, %s, %s, 1)
+            ON DUPLICATE KEY UPDATE file_type = %s, tb_validation_completed = 1, updated_at = CURRENT_TIMESTAMP
+        """, (file_id, client_id, file_type, file_type))
+    elif step == 'account_mapping':
+        cursor.execute("""
+            INSERT INTO workflow_stages (file_id, client_id, file_type, account_mapping_completed)
+            VALUES (%s, %s, %s, 1)
+            ON DUPLICATE KEY UPDATE file_type = %s, account_mapping_completed = 1, updated_at = CURRENT_TIMESTAMP
+        """, (file_id, client_id, file_type, file_type))
+    elif step == 'financial_analysis':
+        cursor.execute("""
+            INSERT INTO workflow_stages (file_id, client_id, file_type, financial_analysis_completed)
+            VALUES (%s, %s, %s, 1)
+            ON DUPLICATE KEY UPDATE file_type = %s, financial_analysis_completed = 1, updated_at = CURRENT_TIMESTAMP
+        """, (file_id, client_id, file_type, file_type))
+    
+    conn.commit()
+    conn.close()
+
+def initialize_workflow_stage(file_id: str, client_id: str, file_type: str):
+    """
+    Initialize workflow stage when a file is cleaned.
+    Sets the appropriate starting stage based on file_type.
+    Only bails out if stage has genuinely progressed past 'mapped' —
+    'mapped' is treated as a pre-cleaning placeholder that can be overwritten.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT current_stage FROM workflow_stages 
+        WHERE file_id = %s AND client_id = %s
+    """, (file_id, client_id))
+    existing = cursor.fetchone()
+
+    # 'mapped' is just the pre-cleaning placeholder /save-mapping writes —
+    # treat it the same as "no row yet", not as an already-progressed stage
+    if existing and existing["current_stage"] != "mapped":
+        conn.close()
+        return
+
+    cursor.execute("""
+        SELECT can_proceed FROM cleaned_files_registry 
+        WHERE file_id = %s AND client_id = %s AND file_type = %s
+    """, (file_id, client_id, file_type))
+    cleaned = cursor.fetchone()
+
+    if file_type == 'trial_balance':
+        starting_stage = 'tb_validation'
+    elif file_type in ['general_ledger', 'accounts_receivable', 'accounts_payable']:
+        starting_stage = 'account_mapping'
+    else:
+        can_proceed = cleaned['can_proceed'] if cleaned else False
+        starting_stage = 'financial_analysis' if can_proceed else 'clean'
+
+    cursor.execute("""
+        INSERT INTO workflow_stages (file_id, client_id, file_type, current_stage)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE current_stage = VALUES(current_stage), updated_at = CURRENT_TIMESTAMP
+    """, (file_id, client_id, file_type, starting_stage))
+
+    conn.commit()
+    conn.close()
+
+
+# Auditor Workspaces helper functions
+def get_or_create_workspace(user_id: int, engagement_id: int, section_id: int = None, file_id: str = None):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    if section_id:
+        cursor.execute("""
+            SELECT w.*, e.engagement_name, c.company_name, s.section_name, u.full_name as user_name
+            FROM auditor_workspaces w
+            JOIN engagements e ON w.engagement_id = e.engagement_id
+            JOIN clients c ON e.client_id = c.client_id
+            LEFT JOIN audit_sections s ON w.section_id = s.section_id
+            JOIN users u ON w.user_id = u.user_id
+            WHERE w.user_id = %s AND w.engagement_id = %s AND w.section_id = %s
+        """, (user_id, engagement_id, section_id))
+    else:
+        cursor.execute("""
+            SELECT w.*, e.engagement_name, c.company_name, s.section_name, u.full_name as user_name
+            FROM auditor_workspaces w
+            JOIN engagements e ON w.engagement_id = e.engagement_id
+            JOIN clients c ON e.client_id = c.client_id
+            LEFT JOIN audit_sections s ON w.section_id = s.section_id
+            JOIN users u ON w.user_id = u.user_id
+            WHERE w.user_id = %s AND w.engagement_id = %s AND w.section_id IS NULL
+        """, (user_id, engagement_id))
+        
+    workspace = cursor.fetchone()
+    
+    if not workspace:
+        default_progress = json.dumps({
+            "mapping_completed": False,
+            "cleaning_completed": False,
+            "analysis_completed": False,
+            "submitted_for_review": False
+        })
+        cursor.execute("""
+            INSERT INTO auditor_workspaces (user_id, engagement_id, section_id, file_id, status, notes, progress_data)
+            VALUES (%s, %s, %s, %s, 'active', '', %s)
+        """, (user_id, engagement_id, section_id, file_id, default_progress))
+        conn.commit()
+        ws_id = cursor.lastrowid
+        
+        cursor.execute("""
+            SELECT w.*, e.engagement_name, c.company_name, s.section_name, u.full_name as user_name
+            FROM auditor_workspaces w
+            JOIN engagements e ON w.engagement_id = e.engagement_id
+            JOIN clients c ON e.client_id = c.client_id
+            LEFT JOIN audit_sections s ON w.section_id = s.section_id
+            JOIN users u ON w.user_id = u.user_id
+            WHERE w.workspace_id = %s
+        """, (ws_id,))
+        workspace = cursor.fetchone()
+    elif file_id and workspace.get('file_id') != file_id:
+        cursor.execute("UPDATE auditor_workspaces SET file_id = %s WHERE workspace_id = %s", (file_id, workspace['workspace_id']))
+        conn.commit()
+        workspace['file_id'] = file_id
+
+    # Auto-resolve file_id from uploads table if file_id is missing
+    if workspace and not workspace.get('file_id'):
+        if workspace.get('section_id'):
+            # Prefer the file actually tagged for this section
+            cursor.execute("""
+                SELECT file_id, filename, file_type 
+                FROM uploads 
+                WHERE section_id = %s
+                ORDER BY upload_date DESC LIMIT 1
+            """, (workspace['section_id'],))
+            latest_file = cursor.fetchone()
+        else:
+            latest_file = None
+
+        if not latest_file:
+            cursor.execute("""
+                SELECT f.file_id, f.filename, f.file_type 
+                FROM uploads f
+                JOIN engagements e ON CAST(f.client_id AS CHAR) = CAST(e.client_id AS CHAR)
+                WHERE e.engagement_id = %s
+                ORDER BY f.upload_date DESC LIMIT 1
+            """, (workspace['engagement_id'],))
+            latest_file = cursor.fetchone()
+
+        if latest_file:
+            auto_file_id = latest_file['file_id']
+            cursor.execute("UPDATE auditor_workspaces SET file_id = %s WHERE workspace_id = %s", (auto_file_id, workspace['workspace_id']))
+            conn.commit()
+            workspace['file_id'] = auto_file_id
+            workspace['filename'] = latest_file.get('filename')
+            workspace['file_type'] = latest_file.get('file_type')
+
+    # Fetch filename and file_type if file_id is set
+    if workspace and workspace.get('file_id') and not workspace.get('filename'):
+        cursor.execute("SELECT filename, file_type FROM uploads WHERE file_id = %s LIMIT 1", (workspace['file_id'],))
+        f_info = cursor.fetchone()
+        if f_info:
+            workspace['filename'] = f_info.get('filename')
+            workspace['file_type'] = f_info.get('file_type')
+
+    conn.close()
+
+    if workspace and workspace.get('progress_data'):
+        try:
+            if isinstance(workspace['progress_data'], str):
+                workspace['progress_data'] = json.loads(workspace['progress_data'])
+        except Exception:
+            pass
+
+    return workspace
+
+
+def get_workspace_by_id(workspace_id: int):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT w.*, e.engagement_name, e.financial_year, c.company_name, c.client_id, s.section_name, u.full_name as user_name
+        FROM auditor_workspaces w
+        JOIN engagements e ON w.engagement_id = e.engagement_id
+        JOIN clients c ON e.client_id = c.client_id
+        LEFT JOIN audit_sections s ON w.section_id = s.section_id
+        JOIN users u ON w.user_id = u.user_id
+        WHERE w.workspace_id = %s
+    """, (workspace_id,))
+    workspace = cursor.fetchone()
+
+    if workspace:
+        if not workspace.get('file_id'):
+            cursor.execute("""
+                SELECT f.file_id, f.filename, f.file_type, f.client_id as upload_client_id 
+                FROM uploads f
+                JOIN engagements e ON CAST(f.client_id AS CHAR) = CAST(e.client_id AS CHAR)
+                WHERE e.engagement_id = %s
+                ORDER BY f.upload_date DESC LIMIT 1
+            """, (workspace['engagement_id'],))
+            latest_file = cursor.fetchone()
+            if latest_file:
+                auto_file_id = latest_file['file_id']
+                cursor.execute("UPDATE auditor_workspaces SET file_id = %s WHERE workspace_id = %s", (auto_file_id, workspace['workspace_id']))
+                conn.commit()
+                workspace['file_id'] = auto_file_id
+                workspace['filename'] = latest_file.get('filename')
+                workspace['file_type'] = latest_file.get('file_type')
+                workspace['client_id'] = latest_file.get('upload_client_id')  # Use the upload client_id (VARCHAR)
+        
+        # If workspace has file_id but client_id is still INT from clients table, update it to match uploads table
+        if workspace.get('file_id'):
+            cursor.execute("SELECT client_id FROM uploads WHERE file_id = %s LIMIT 1", (workspace['file_id'],))
+            upload_client = cursor.fetchone()
+            if upload_client:
+                workspace['client_id'] = upload_client['client_id']  # Use the upload client_id (VARCHAR)
+        
+        if workspace.get('file_id') and not workspace.get('filename'):
+            cursor.execute("SELECT filename, file_type, client_id FROM uploads WHERE file_id = %s LIMIT 1", (workspace['file_id'],))
+            f_info = cursor.fetchone()
+            if f_info:
+                workspace['filename'] = f_info.get('filename')
+                workspace['file_type'] = f_info.get('file_type')
+                workspace['client_id'] = f_info.get('client_id')  # Use the upload client_id (VARCHAR)
+
+    conn.close()
+
+    if workspace and workspace.get('progress_data'):
+        try:
+            if isinstance(workspace['progress_data'], str):
+                workspace['progress_data'] = json.loads(workspace['progress_data'])
+        except Exception:
+            pass
+
+    return workspace
+
+
+def update_workspace_data(workspace_id: int, status: str = None, notes: str = None, progress_data: dict = None, file_id: str = None):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    updates = []
+    params = []
+
+    if status is not None:
+        updates.append("status = %s")
+        params.append(status)
+    if notes is not None:
+        updates.append("notes = %s")
+        params.append(notes)
+    if progress_data is not None:
+        updates.append("progress_data = %s")
+        params.append(json.dumps(progress_data))
+    if file_id is not None:
+        updates.append("file_id = %s")
+        params.append(file_id)
+
+    if updates:
+        query = f"UPDATE auditor_workspaces SET {', '.join(updates)} WHERE workspace_id = %s"
+        params.append(workspace_id)
+        cursor.execute(query, tuple(params))
+        conn.commit()
+
+    conn.close()
+
+
+def get_engagement_workspaces(engagement_id: int):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT w.*, s.section_name, u.full_name as user_name, u.role as user_role
+        FROM auditor_workspaces w
+        LEFT JOIN audit_sections s ON w.section_id = s.section_id
+        JOIN users u ON w.user_id = u.user_id
+        WHERE w.engagement_id = %s
+        ORDER BY w.updated_at DESC
+    """, (engagement_id,))
+    workspaces = cursor.fetchall()
+    conn.close()
+
+    for ws in workspaces:
+        if ws.get('progress_data'):
+            try:
+                if isinstance(ws['progress_data'], str):
+                    ws['progress_data'] = json.loads(ws['progress_data'])
+            except Exception:
+                pass
+
+    return workspaces
+
+def get_user_workspaces(user_id: int):
+    """
+    Returns every workspace belonging to a single user, across all
+    engagements — used for the Auditor's "My Workspaces" dashboard so they
+    can resume any in-progress file without needing the original notification.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT w.*, e.engagement_name, e.financial_year, c.company_name, s.section_name
+        FROM auditor_workspaces w
+        JOIN engagements e ON w.engagement_id = e.engagement_id
+        JOIN clients c ON e.client_id = c.client_id
+        LEFT JOIN audit_sections s ON w.section_id = s.section_id
+        WHERE w.user_id = %s
+        ORDER BY w.updated_at DESC
+    """, (user_id,))
+    workspaces = cursor.fetchall()
+    conn.close()
+
+    for ws in workspaces:
+        if ws.get('progress_data'):
+            try:
+                if isinstance(ws['progress_data'], str):
+                    ws['progress_data'] = json.loads(ws['progress_data'])
+            except Exception:
+                pass
+
+    return workspaces

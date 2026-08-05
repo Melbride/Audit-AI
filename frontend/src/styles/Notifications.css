@@ -62,40 +62,75 @@
 
 /* Notifications card wrapper */
 .notif-card {
-  background: var(--background) !important; /* Flattens card panel */
+  background: var(--background) !important;
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: none !important;            /* Removes shadows */
+  box-shadow: none !important;
   overflow: hidden;
   margin-top: 14px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.notif-card::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notif-card::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
 }
 
 .notif-loading,
 .notif-empty {
-  padding: 16px;
+  padding: 48px 24px;
   color: var(--text-soft);
-  background: var(--background);
-  font-size: 13px;
+  background: var(--surface);
+  font-size: 14px;
+  text-align: center;
+  border-radius: 8px;
+}
+
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.notif-empty::before {
+  content: "✓";
+  font-size: 48px;
+  color: var(--primary);
+  opacity: 0.3;
 }
 
 /* Individual notification row */
 .notif-item {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 10px 14px; /* Compact row sizes */
+  gap: 14px;
+  padding: 16px 18px;
   border-bottom: 1px solid var(--border);
-  transition: background var(--transition);
+  transition: all var(--transition);
+  background: var(--background);
+  position: relative;
+}
+
+.notif-item:last-child {
+  border-bottom: none;
 }
 
 .notif-item--read {
-  background: var(--surface) !important; /* Nested */
+  background: var(--surface);
   cursor: default;
+  opacity: 0.8;
 }
 
 .notif-item--unread {
-  background: rgba(56, 189, 248, 0.03) !important; /* Sky-blue indicator */
+  background: var(--background);
   cursor: pointer;
+  border-left: 3px solid var(--accent);
 }
 
 /* Row hovers */
@@ -155,4 +190,158 @@
   padding: 0 !important;
   border-radius: 0 !important;
   flex-shrink: 0;
+}
+
+/* Notification action buttons */
+.notif-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.notif-btn-view,
+.notif-btn-proceed {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.notif-btn-view {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.notif-btn-view:hover {
+  background: var(--surface-hover);
+}
+
+.notif-btn-proceed {
+  background: var(--primary);
+  color: var(--background);
+}
+
+.notif-btn-proceed:hover {
+  background: var(--primary-hover);
+}
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--background);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background var(--transition);
+}
+
+.modal-close:hover {
+  background: var(--surface);
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.table-wrapper {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.table-wrapper table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-wrapper th,
+.table-wrapper td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.table-wrapper th {
+  background: var(--surface);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.table-wrapper td {
+  color: var(--text-soft);
+}
+
+.error-message {
+  padding: 20px;
+  text-align: center;
+  color: var(--text);
+}
+
+.error-message p {
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+.error-message strong {
+  color: #dc2626;
+  font-size: 16px;
 }

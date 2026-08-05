@@ -944,6 +944,7 @@ async def detect_columns_endpoint(
     columns: str = Form(...),
     file_type: str = Form("general"),
 ):
+    print(f"DEBUG: Detect columns requested - file_id={file_id}, client_id={client_id}, file_type={file_type}")
     try:
         columns_list = json.loads(columns)
     except json.JSONDecodeError:

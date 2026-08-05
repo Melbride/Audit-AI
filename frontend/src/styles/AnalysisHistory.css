@@ -1,0 +1,335 @@
+.analysis-history {
+  padding: 0;
+}
+
+.analysis-history-header {
+  margin-bottom: 24px;
+}
+
+.analysis-history-header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.analysis-history-header p {
+  font-size: 14px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.analysis-filters {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.filter-group select {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font-size: 13px;
+  min-width: 200px;
+  cursor: pointer;
+}
+
+.filter-group select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  gap: 16px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  text-align: center;
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.empty-state h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 16px 0 8px;
+}
+
+.empty-state p {
+  font-size: 14px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.analysis-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.client-group {
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.client-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--surface-hover);
+  border-bottom: 1px solid var(--border);
+}
+
+.client-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.file-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: var(--background);
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: all var(--transition);
+}
+
+.file-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 12px rgba(42, 122, 214, 0.1);
+}
+
+.file-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-hover);
+  border-radius: 8px;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-info h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.file-type-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: rgba(42, 122, 214, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+
+.engagement-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(243, 112, 35, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.file-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.analyze-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: var(--background);
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+
+.analyze-btn:hover {
+  background: var(--primary-hover);
+}
+
+.delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: var(--surface);
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.delete-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #dc2626;
+}
+
+/* File Analysis History - Compact Version */
+.file-analysis-history {
+  padding: 0;
+}
+
+.file-analysis-history .analysis-history-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.file-analysis-history .analysis-history-header p {
+  font-size: 13px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.file-card--compact {
+  padding: 12px;
+  gap: 10px;
+}
+
+.file-card--compact .file-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.file-card--compact .file-info h4 {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.file-card--compact .file-meta {
+  gap: 8px;
+}
+
+.file-card--compact .meta-item {
+  font-size: 11px;
+}
+
+.analyze-btn--small {
+  padding: 6px 12px;
+  font-size: 12px;
+  gap: 4px;
+}
+
+.analyze-btn--small svg {
+  width: 14px;
+  height: 14px;
+}
+
+.delete-btn--small {
+  padding: 6px;
+  width: 28px;
+  height: 28px;
+}
+
+.delete-btn--small svg {
+  width: 14px;
+  height: 14px;
+}

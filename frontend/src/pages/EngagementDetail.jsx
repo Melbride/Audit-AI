@@ -6,8 +6,6 @@ import {
   getEngagement,
   getAuditSections,
   getSectionLatestSubmission,
-  updateSubmissionStatus,
-  createSubmission,
   sendToClient,
   downloadStatementTemplate,
 } from "../services/api";
@@ -84,224 +82,9 @@ export default function EngagementDetail({ user }) {
     setLoading(false);
   };
 
-  // Handles workflow actions (approve, forward, return, cancel).
-  // Creates a new submission if none exists yet for this section,
-  // otherwise updates the existing one. Reloads data afterward so
-  // the table reflects the new status/stage.
-  const handleAction = async (
-    section,
-    submission,
-    newStatus,
-    newStage,
-    notes = null
-  ) => {
-    if (!user) return;
-
-    setActingOn(section.section_id);
-
-    try {
-      if (submission) {
-        // Update an existing submission
-        await updateSubmissionStatus(submission.submission_id, {
-          status: newStatus,
-          current_stage: newStage,
-          notes,
-          updated_by: user.user_id,
-        });
-      } else {
-        // Create a new submission
-        await createSubmission({
-          engagement_id: engagementId,
-          section_id: section.section_id,
-          submitted_by: user.user_id,
-          status: newStatus,
-          current_stage: newStage,
-          notes,
-        });
-      }
-
-      // Reload latest data so the UI reflects the new status/stage
-      await loadData();
-    } catch (err) {
-      console.error("Failed to update submission", err);
-    }
-
-    setActingOn(null);
-  };
-
   // Converts a status string into a CSS-safe class suffix
   const getStatusClass = (status) =>
     status.toLowerCase().replace(/\s+/g, "-");
-
-  // Renders the workflow action area for a single section
- 
-  const renderActions = (section, submission) => {
-    if (!user) return null;
-
-    const stage = submission?.current_stage || "Accountant";
-    const status = submission?.status || "Draft";
-    const isActing = actingOn === section.section_id;
-    const role = user.role;
-
-    // Admins are observers only — show status text, no action buttons
-    if (role === "Admin") {
-      return (
-        <span className="workflow-text">
-          {status === "Approved"
-            ? "Approved"
-            : status === "Cancelled"
-            ? "Cancelled"
-            : `Waiting on ${stage}`}
-        </span>
-      );
-    }
-
-    // Terminal state: already approved, nothing more to do
-    if (status === "Approved") {
-      return (
-        <span className="workflow-approved">
-          Approved
-        </span>
-      );
-    }
-
-    // Terminal state: cancelled, nothing more to do
-    if (status === "Cancelled") {
-      return (
-        <span className="workflow-cancelled">
-          Cancelled
-        </span>
-      );
-    }
-
-    // If the logged-in user's role is not the current workflow stage,
-    // they cannot perform any action and should wait for the assigned reviewer.
-    if (role !== stage) {
-      return (
-        <span className="workflow-text">
-          Waiting on {stage}
-        </span>
-      );
-    }
-
-    // Find the current stage's position in the workflow
-    const currentIndex = WORKFLOW.indexOf(stage);
-
-    // Determine the previous stage (used when sending work back for revisions)
-    const prevStage =
-      currentIndex > 0 ? WORKFLOW[currentIndex - 1] : null;
-
-    // Determine the next stage (used when forwarding the submission)
-    const nextStage =
-      currentIndex < WORKFLOW.length - 1
-        ? WORKFLOW[currentIndex + 1]
-        : null;
-
-    // Check whether this is the final approval stage
-    const isLastStage =
-      currentIndex === WORKFLOW.length - 1;
-
-    return (
-      <div className="workflow-actions">
-        {/* Action buttons for workflow progression */}
-        <div className="workflow-buttons">
-
-          {/* Final stage users approve the submission; earlier stages forward it on */}
-          {isLastStage ? (
-            <button
-              className="action-btn success"
-              disabled={isActing}
-              onClick={() =>
-                handleAction(
-                  section,
-                  submission,
-                  "Approved",
-                  null,
-                  noteDrafts[section.section_id] || null
-                )
-              }
-            >
-              {isActing ? "Approving..." : "Approve"}
-            </button>
-          ) : (
-            // Non-final stage users forward the submission to the next reviewer
-            <button
-              className="action-btn secondary"
-              disabled={isActing}
-              onClick={() =>
-                handleAction(
-                  section,
-                  submission,
-                  "Under Review",
-                  nextStage,
-                  noteDrafts[section.section_id] || null
-                )
-              }
-            >
-              {isActing
-                ? "Forwarding..."
-                : `Forward to ${nextStage}`}
-            </button>
-          )}
-
-          {/*
-            Display the "Return" button only if there is a previous stage
-            in the workflow. This allows the current reviewer to send the
-            submission back for corrections.
-          */}
-          {prevStage && (
-            <button
-              className="action-btn warning"
-              disabled={isActing}
-              onClick={() =>
-                handleAction(
-                  section,
-                  submission,
-                  "Changes Requested",
-                  prevStage,
-                  noteDrafts[section.section_id] || null
-                )
-              }
-            >
-              Return to {prevStage}
-            </button>
-          )}
-
-          {/* Allow the current reviewer to cancel the submission workflow */}
-          <button
-            className="action-btn danger"
-            disabled={isActing}
-            onClick={() =>
-              handleAction(
-                section,
-                submission,
-                "Cancelled",
-                null,
-                noteDrafts[section.section_id] || null
-              )
-            }
-          >
-            Cancel
-          </button>
-
-        </div>
-
-        {/* Input field for adding optional notes or feedback before taking an action */}
-        <input
-          className="note-input"
-          type="text"
-          placeholder="Add a note (optional)"
-          value={noteDrafts[section.section_id] || ""}
-          onChange={(e) =>
-            setNoteDrafts((prev) => ({
-              ...prev,
-              [section.section_id]: e.target.value,
-            }))
-          }
-        />
-      </div>
-    );
-  };
 
   // Display a message if no engagement has been selected.
   if (!engagementId) {
@@ -347,7 +130,7 @@ export default function EngagementDetail({ user }) {
         className="back-button"
         onClick={() => navigate("/engagements")}
       >
-        ← Back to Engagements
+        Back to Engagements
       </button>
 
       {/* Display the selected engagement's basic information */}
@@ -436,11 +219,8 @@ export default function EngagementDetail({ user }) {
             {/* Render each audit section and its workflow status */}
             <tbody>
               {sections.map((section) => {
-                const submission =
-                  submissions[section.section_id];
-
-                const status =
-                  submission?.status || "Draft";
+                const submission = submissions[section.section_id];
+                const status = submission?.status || "Draft";
 
                 return (
                   <Fragment key={section.section_id}>
@@ -453,19 +233,11 @@ export default function EngagementDetail({ user }) {
 
                     {/* Current workflow status and reviewer notes */}
                     <td>
-                      <span
-                        className={`status-badge ${getStatusClass(
-                          status
-                        )}`}
-                      >
+                      <span className={`status-badge ${getStatusClass(status)}`}>
                         {status}
                       </span>
-
-                      {/* Display reviewer notes if available */}
                       {submission?.notes && (
-                        <div className="status-note">
-                          "{submission.notes}"
-                        </div>
+                        <div className="status-note">"{submission.notes}"</div>
                       )}
                     </td>
 
@@ -491,12 +263,17 @@ export default function EngagementDetail({ user }) {
 
                     {/* Render workflow action buttons based on the user's role */}
                     <td>
-                      {renderActions(
-                        section,
-                        submission
+                      {submission ? (
+                        <button
+                          className="action-btn secondary"
+                          onClick={() => navigate(`/submissions/${submission.submission_id}/review`)}
+                        >
+                          📋 Review Submission
+                        </button>
+                      ) : (
+                        <span className="workflow-text">Not yet submitted</span>
                       )}
                     </td>
-
                   </tr>
 
                   {/* Expanded panel: milestone tracker + review log for this section */}

@@ -5,6 +5,7 @@ import UploadPage from './pages/UploadPage'
 import MappingPage from './pages/MappingPage'
 import CleanPage from './pages/CleanPage'
 import AnalysisPage from './pages/AnalysisPage'
+import AnalysisHistory from './pages/AnalysisHistory'
 import CorrectedResultsPage from './pages/CorrectedResultsPage'
 import TrialBalancePage from './pages/TrialBalancePage'
 import AccountMappingPage from './pages/AccountMappingPage'
@@ -28,6 +29,9 @@ import Reports from './pages/Reports'
 import ReportDetail from './pages/ReportDetail'
 import Layout from './pages/Layout'
 import ClientDetailsPage from './pages/ClientDetailsPage'
+import WorkspacePage from './pages/WorkspacePage'
+import SubmissionReviewPage from './pages/SubmissionReviewPage'
+import MyWorkspaces from './pages/MyWorkspaces'
 import './App.css'
 import FinancialStatementsPage from './pages/FinancialStatementsPage'
 function RequireAuth({ user, children }) {
@@ -119,6 +123,17 @@ function App() {
             </RequireAuth>
           }
         />
+        {/* Analysis history - view past analyses */}
+        <Route
+          path="/analysis/history"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <AnalysisHistory user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
         {/* Analysis scoped to a specific engagement, linked from EngagementDetail */}
         <Route
           path="/analysis/:engagementId"
@@ -126,6 +141,16 @@ function App() {
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
                 <AnalysisPage user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/workspace/:workspaceId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <WorkspacePage user={user} />
               </Layout>
             </RequireAuth>
           }
@@ -198,6 +223,26 @@ function App() {
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
                 <Submissions user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/submissions/:submissionId/review"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <SubmissionReviewPage user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/my-workspaces"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <MyWorkspaces user={user} />
               </Layout>
             </RequireAuth>
           }

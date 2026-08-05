@@ -135,12 +135,20 @@ export const markAllNotificationsRead = (userId) =>
 // SUBMISSIONS: Accountant → Auditor → Senior Auditor for each audit section
 
 // Get the most recent submission for a specific audit section
-export const getSectionLatestSubmission = (sectionId) =>
-    API.get(`/audit-sections/${sectionId}/latest-submission`)
+export const getSectionLatestSubmission = (sectionId, fileId = null) =>
+    API.get(`/audit-sections/${sectionId}/latest-submission`, fileId ? { params: { file_id: fileId } } : undefined)
 
 // Get all submissions across every engagement
 export const getAllSubmissions = () =>
     API.get('/submissions')
+
+// Get a single submission by id
+export const getSubmission = (submissionId) =>
+    API.get(`/submissions/${submissionId}`)
+
+// Get comprehensive review data for a submission
+export const getSubmissionReviewData = (submissionId) =>
+    API.get(`/submissions/${submissionId}/review-data`)
 
 // Create a new submission (first time a section is forwarded)
 // data = { engagement_id, section_id, submitted_by, status, current_stage, notes }
@@ -166,7 +174,18 @@ export const uploadFile = (formData) =>
         headers: { 'Content-Type': 'multipart/form-data' }
     })
 
+// Get file preview by file_id
+export const getFilePreview = (fileId, clientId) =>
+    API.get(`/file-preview/${fileId}`, { params: { client_id: clientId } })
+
 // Get upload history for a client
+
+// Submit an uploaded file for auditor review
+export const submitFile = (formData) =>
+    API.post('/upload/submit', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
 export const getUploads = (clientId) =>
     API.get(`/uploads/${clientId}`)
 
@@ -222,6 +241,16 @@ export const submitCorrectedExcel = (formData) =>
     })
 
 //
+// Workflow step completion
+export const completeWorkflowStep = (formData) =>
+    API.post('/workflow/complete-step', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
+export const getWorkflowStage = (fileId, clientId, fileType = 'general') =>
+    API.get(`/workflow/stage/${fileId}`, { params: { client_id: clientId, file_type: fileType } })
+
+// ===============================
 // REPORTS (Month 3) — versioned reports/report_versions/report_approvals
 // system, served from /api/reports (see report_routes.py)
 //
@@ -336,3 +365,89 @@ export const downloadStatementTemplate = async (engagementId, engagementName = "
 }
 
 export default API
+// ===============================
+// FINANCIAL ANALYSIS
+// ===============================
+
+// Run financial analysis on a cleaned file
+export const analyzeFinancials = (clientId, fileId, fileType) => {
+    const formData = new FormData();
+    formData.append('file_id', fileId);
+    formData.append('file_type', fileType);
+    return API.post(`/analyze/${clientId}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+}
+
+// Generate AI insights for financial analysis
+export const analyzeInsights = (clientId, fileId, fileType) => {
+    const formData = new FormData();
+    formData.append('file_id', fileId);
+    formData.append('file_type', fileType);
+    return API.post(`/analyze/${clientId}/insights`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+}
+
+// ===============================
+// SAVED ANALYSES
+// ===============================
+
+// Save a financial analysis result
+export const saveAnalysis = (data) =>
+    API.post('/saved-analyses', data, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
+// Get all saved analyses for a user
+export const getSavedAnalyses = (userId) =>
+    API.get(`/saved-analyses/${userId}`)
+
+// Get all saved analyses for an engagement (team-scoped, not just the
+// current user's own saves) — every snapshot saved by anyone for this
+// engagement, most recent first per file. Use to build a per-file history
+// with attribution (who saved it, when).
+export const getSavedAnalysesForEngagement = (engagementId) =>
+    API.get(`/engagements/${engagementId}/saved-analyses`)
+
+// Get saved analyses for a specific file within an engagement — this is
+// what an auditor needs when working on a particular file. Returns all
+// analysis snapshots for that specific file, with attribution.
+export const getSavedAnalysesForFile = (engagementId, fileId) =>
+    API.get(`/engagements/${engagementId}/saved-analyses/${fileId}`)
+
+// Get a specific saved analysis
+export const getSavedAnalysis = (analysisId) =>
+    API.get(`/saved-analyses/${analysisId}/view`)
+
+// Delete a saved analysis
+export const deleteSavedAnalysis = (analysisId) =>
+    API.delete(`/saved-analyses/${analysisId}`)
+
+// ===============================
+// AUDITOR WORKSPACES
+// ===============================
+
+// Open or auto-create an auditor workspace
+export const openWorkspace = (data) =>
+    API.post('/workspaces/open', data)
+
+// Get a workspace by ID
+export const getWorkspace = (workspaceId) =>
+    API.get(`/workspaces/${workspaceId}`)
+
+// Get all workspaces belonging to a specific user, across all engagements
+export const getUserWorkspaces = (userId) =>
+    API.get(`/users/${userId}/workspaces`)
+
+// Update workspace (status, notes, progress_data, file_id)
+export const updateWorkspace = (workspaceId, data) =>
+    API.put(`/workspaces/${workspaceId}`, data)
+
+// Submit workspace for review
+export const submitWorkspaceForReview = (workspaceId, data) =>
+    API.post(`/workspaces/${workspaceId}/submit-for-review`, data)
+
+// Get all workspaces for an engagement
+export const getEngagementWorkspaces = (engagementId) =>
+    API.get(`/engagements/${engagementId}/workspaces`)

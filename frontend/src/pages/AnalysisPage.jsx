@@ -1,110 +1,49 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { getEngagement } from "../services/api";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import axios from "axios";
+import {
+  AlertTriangle,
+  Diamond,
+  Info,
+  TrendingUp,
+  Zap,
+  Droplet,
+  Landmark,
+  BarChart3,
+  DollarSign,
+  Calendar,
+  Receipt,
+  Loader2,
+  FileWarning,
+  ArrowRight,
+  ArrowLeft,
+  History,
+} from "lucide-react";
+import { getEngagement, saveAnalysis, openWorkspace } from "../services/api";
 import GenerateReportModal from "../components/GenerateReportModal";
+import "../styles/analysis.css";
 
-// ── MOCK DATA ─────────────────────────────────────────────────────────────────
-const MOCK_FULL = {
-  client_id: "5",
-  file_type: "bank_transactions",
-  analysis_scope: "full",
-  period: "2024",
-  financial_summary: {
-    total_revenue: 450000,
-    total_expenses: 320000,
-    net_profit: 130000,
-    expense_by_department: { IT: 120000, Operations: 90000, Finance: 60000, HR: 30000, Marketing: 20000 },
-    monthly_trend: [
-      { month: "Jan", revenue: 35000, expenses: 28000 },
-      { month: "Feb", revenue: 40000, expenses: 25000 },
-      { month: "Mar", revenue: 38000, expenses: 30000 },
-      { month: "Apr", revenue: 42000, expenses: 27000 },
-      { month: "May", revenue: 45000, expenses: 32000 },
-      { month: "Jun", revenue: 41000, expenses: 29000 },
-      { month: "Jul", revenue: 43000, expenses: 31000 },
-      { month: "Aug", revenue: 39000, expenses: 26000 },
-      { month: "Sep", revenue: 44000, expenses: 33000 },
-      { month: "Oct", revenue: 47000, expenses: 28000 },
-      { month: "Nov", revenue: 36000, expenses: 31000 },
-      { month: "Dec", revenue: 50000, expenses: 30000 },
-    ],
-  },
-  ai_insights: [
-    {
-      type: "anomaly",
-      severity: "high",
-      title: "IT Department Overspend",
-      narrative: "IT department expenditure reached KES 120,000, representing 37.5% of total expenses — significantly above the typical benchmark of 20–25% for organizations of this size. This spike was most pronounced in Q3, where IT costs exceeded the monthly average by 18%. The pattern suggests unplanned infrastructure purchases or software licensing renewals that were not captured in the original budget.",
-      guideline: "Conduct a line-item review of IT invoices for Q3. Ensure all recurring software subscriptions are consolidated into a single vendor contract where possible, and establish a pre-approval threshold for IT purchases above KES 10,000.",
-    },
-    {
-      type: "anomaly",
-      severity: "medium",
-      title: "Transport Expense Spike in February",
-      narrative: "Transport and travel expenses increased by 22% in February compared to January, rising from an estimated KES 4,200 to KES 5,100. This increase occurred during a period of flat revenue growth, suggesting the cost was not tied to business development activity. No corresponding increase in client visits or field assignments was recorded in the same period.",
-      guideline: "Request supporting documentation (receipts, travel logs) for all transport claims submitted in February. Consider implementing a monthly travel budget cap per department and requiring manager sign-off for claims exceeding KES 2,000.",
-    },
-    {
-      type: "trend",
-      severity: "info",
-      title: "Consistent Revenue Growth Trajectory",
-      narrative: "Revenue has grown steadily across the financial year, starting at KES 35,000 in January and reaching KES 50,000 in December — a 43% increase over 12 months. The growth is particularly strong in Q4, with October and December recording the two highest monthly revenues. This pattern is consistent with seasonal demand cycles common in this industry.",
-      guideline: "Use Q4 performance as the baseline for next year's budget planning. Consider front-loading sales and marketing spend in Q1 and Q2 to smooth the seasonal dip observed in January and November, and to sustain momentum throughout the year.",
-    },
-    {
-      type: "variance",
-      severity: "medium",
-      title: "Profit Margin Below Target",
-      narrative: "The net profit margin for the period stands at 28.9% (KES 130,000 on KES 450,000 revenue). While profitable, this falls below the industry benchmark of 35% for comparable firms. The primary drag is the Operations department, which accounts for 28% of total expenses (KES 90,000), and has shown limited efficiency gains despite revenue growth of 43%.",
-      guideline: "Commission an operational efficiency review focusing on the Operations department. Identify recurring costs that have not scaled proportionally with revenue, and set a target to reduce the expense-to-revenue ratio from 71% to 65% by mid-year.",
-    },
-    {
-      type: "trend",
-      severity: "info",
-      title: "Marketing Spend Underutilised",
-      narrative: "Marketing expenditure totalled only KES 20,000 for the full year — just 6.25% of total expenses. Given the strong revenue growth observed in Q4, it is likely that increased marketing investment could have accelerated customer acquisition earlier in the year. The current allocation is low relative to the 10–15% marketing spend typical for growing firms in this sector.",
-      guideline: "Increase the marketing budget allocation for the next financial year to at least 10% of projected revenue. Prioritise digital channels with measurable ROI (email campaigns, social media, SEO) and schedule a mid-year review to reallocate funds based on channel performance.",
-    },
-  ],
-};
+const API_BASE = "http://localhost:8000";
 
-const MOCK_EXPENSE_ONLY = {
-  client_id: "5",
-  file_type: "Acme Expenses Custom",
-  analysis_scope: "expense_only",
-  period: "2024",
-  financial_summary: {
-    total_revenue: null,
-    total_expenses: 320000,
-    net_profit: null,
-    expense_by_department: { IT: 120000, Operations: 90000, Finance: 60000, HR: 50000 },
-    monthly_trend: [
-      { month: "Jan", revenue: null, expenses: 28000 },
-      { month: "Feb", revenue: null, expenses: 25000 },
-      { month: "Mar", revenue: null, expenses: 30000 },
-    ],
-  },
-  ai_insights: [
-    {
-      type: "info",
-      severity: "info",
-      title: "Expense-Only Data Detected",
-      narrative: "The uploaded file contains only expense records — no revenue or income figures were identified. As a result, profit and loss calculations cannot be completed, and the revenue trend chart has been hidden. The expense breakdown and monthly cost trends are still available for review.",
-      guideline: "To unlock the full analysis including profit/loss charts and margin calculations, upload a corresponding revenue or bank statement file for the same period and run the combined analysis.",
-    },
-  ],
-};
-
-// ── COLORS ────────────────────────────────────────────────────────────────────
+// ── COLORS (chart fills — kept as literal hex since donut/bar slices need a fixed sequence) ──
 const CHART_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#27ae60", "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"];
 
+// icon + label + semantic tone; tone drives color via CSS (data-tone attribute)
 const SEVERITY_CONFIG = {
-  high:     { bg: "#FCEBEB", border: "#F09595", tag: "#A32D2D", tagBg: "#F5B7B1", icon: "⚠️", label: "High Priority" },
-  medium:   { bg: "#FAEEDA", border: "#FAC775", tag: "#854F0B", tagBg: "#FDEBD0", icon: "◆",  label: "Medium Priority" },
-  info:     { bg: "#E6F1FB", border: "#B5D4F4", tag: "#185FA5", tagBg: "#D6EAF8", icon: "ℹ️", label: "Info" },
-  trend:    { bg: "#EAF3DE", border: "#C0DD97", tag: "#3B6D11", tagBg: "#D5F5E3", icon: "📈", label: "Trend" },
-  variance: { bg: "#F4ECF7", border: "#D7BDE2", tag: "#6C3483", tagBg: "#E8DAEF", icon: "⚡", label: "Variance" },
-  anomaly:  { bg: "#FCEBEB", border: "#F09595", tag: "#A32D2D", tagBg: "#F5B7B1", icon: "⚠️", label: "Anomaly" },
+  high:            { icon: AlertTriangle, label: "High Priority",  tone: "danger" },
+  medium:          { icon: Diamond,       label: "Medium Priority", tone: "warning" },
+  info:            { icon: Info,          label: "Info",            tone: "info" },
+  trend:           { icon: TrendingUp,    label: "Trend",           tone: "success" },
+  variance:        { icon: Zap,           label: "Variance",        tone: "purple" },
+  anomaly:         { icon: AlertTriangle, label: "Anomaly",         tone: "danger" },
+  profitability:   { icon: TrendingUp,    label: "Profitability",   tone: "success" },
+  liquidity:       { icon: Droplet,       label: "Liquidity",       tone: "info" },
+  solvency:        { icon: Landmark,      label: "Solvency",        tone: "purple" },
+  margin:          { icon: BarChart3,     label: "Margin",          tone: "success" },
+  expense_mix:     { icon: Diamond,       label: "Expense Mix",     tone: "warning" },
+  revenue_mix:     { icon: DollarSign,    label: "Revenue Mix",     tone: "success" },
+  comparative:     { icon: Calendar,      label: "Comparative",     tone: "info" },
+  statement_check: { icon: Receipt,       label: "Statement Check", tone: "danger" },
 };
 
 const fmt = (n) => n == null ? "—" : new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 }).format(n);
@@ -114,11 +53,17 @@ const fmtShort = (n) => {
   if (n >= 1000) return `KES ${(n / 1000).toFixed(0)}K`;
   return `KES ${n}`;
 };
+const fmtPct = (n) => n == null ? "—" : `${n}%`;
+const trendOf = (n) => (n == null ? undefined : n >= 0 ? "positive" : "negative");
+const fmtDate = (dateStr) => {
+  if (!dateStr) return "—";
+  return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+};
 
 // ── MINI BAR CHART ────────────────────────────────────────────────────────────
 function BarChart({ data, keys, colors, height = 160 }) {
-  const max = Math.max(...data.flatMap(d => keys.map(k => d[k] ?? 0)));
-  const groupW = Math.floor(560 / data.length);
+  const max = Math.max(1, ...data.flatMap(d => keys.map(k => d[k] ?? 0)));
+  const groupW = Math.floor(560 / Math.max(data.length, 1));
   const barW = Math.floor(groupW / (keys.length + 0.8));
 
   return (
@@ -131,12 +76,12 @@ function BarChart({ data, keys, colors, height = 160 }) {
             return (
               <rect key={k} x={ki * (barW + 2)} y={height - h} width={barW} height={h}
                 fill={colors[ki]} rx="2" opacity="0.9">
-                <title>{`${d.month} ${k}: ${fmt(val)}`}</title>
+                <title>{`${d.label} ${k}: ${fmt(val)}`}</title>
               </rect>
             );
           })}
           <text x={groupW / 2 - 8} y={height + 18} textAnchor="middle"
-            style={{ fontSize: "10px", fill: "#7f8c8d" }}>{d.month}</text>
+            className="chart-axis-label">{d.label}</text>
         </g>
       ))}
     </svg>
@@ -145,7 +90,7 @@ function BarChart({ data, keys, colors, height = 160 }) {
 
 // ── DONUT CHART ───────────────────────────────────────────────────────────────
 function DonutChart({ data, colors, size = 150 }) {
-  const total = data.reduce((s, d) => s + d.value, 0);
+  const total = data.reduce((s, d) => s + d.value, 0) || 1;
   const r = size / 2 - 8;
   const cx = size / 2, cy = size / 2;
   let angle = -Math.PI / 2;
@@ -165,17 +110,18 @@ function DonutChart({ data, colors, size = 150 }) {
   return (
     <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
       {slices.map((s, i) => (
-        <path key={i} d={s.path} fill={s.color} stroke="#fff" strokeWidth="2">
+        <path key={i} d={s.path} fill={s.color} stroke="var(--background)" strokeWidth="2">
           <title>{`${s.label}: ${fmt(s.value)} (${s.pct}%)`}</title>
         </path>
       ))}
-      <circle cx={cx} cy={cy} r={r * 0.52} fill="#fff" />
+      <circle cx={cx} cy={cy} r={r * 0.52} fill="var(--background)" />
     </svg>
   );
 }
 
 // ── SPARKLINE ─────────────────────────────────────────────────────────────────
 function Sparkline({ values, color, width = 80, height = 28 }) {
+  if (!values || values.length < 2) return null;
   const max = Math.max(...values), min = Math.min(...values);
   const range = max - min || 1;
   const pts = values.map((v, i) => {
@@ -190,21 +136,59 @@ function Sparkline({ values, color, width = 80, height = 28 }) {
   );
 }
 
+// ── DONUT PANEL (chart + legend, shared by expense/revenue) ───────────────────
+function DonutPanel({ data }) {
+  const total = data.reduce((s, x) => s + x.value, 0) || 1;
+  return (
+    <div className="donut-panel">
+      <DonutChart data={data} colors={CHART_COLORS} size={150} />
+      <div className="donut-legend">
+        {data.map((d, i) => {
+          const pct = Math.round((d.value / total) * 100);
+          return (
+            <div key={d.label} className="legend-row">
+              <span className="legend-dot" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+              <span className="legend-label">{d.label}</span>
+              <span className="legend-pct">{pct}%</span>
+              <span className="legend-value">{fmtShort(d.value)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
-export default function Analytics({ user }) {
+export default function AnalysisPage({ user }) {
   const { engagementId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Two ways to land on this page:
+  // 1. Fresh pipeline run — navigate('/analysis', { state: { cleanResult, clientId, uploadResult, fileType } })
+  // 2. Viewing a saved analysis — navigate('/analysis', { state: { savedAnalysis, isViewMode: true } })
+  //    (from AnalysisHistory.jsx, and eventually an engagement/client "View Analysis" link)
+  const { cleanResult, clientId: liveClientId, uploadResult, fileType: liveFileType, savedAnalysis, isViewMode } = location.state || {};
+
+  const isSavedView = Boolean(isViewMode && savedAnalysis);
+
+  const fileId = isSavedView ? savedAnalysis.file_id : (cleanResult?.file_id || uploadResult?.file_id);
+  const clientId = isSavedView ? String(savedAnalysis.client_id) : liveClientId;
+  const fileType = isSavedView ? savedAnalysis.file_type : liveFileType;
+
   const [engagement, setEngagement] = useState(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [scope, setScope] = useState("full");
-  const [expandedInsight, setExpandedInsight] = useState(null);
 
-  // When reached via /analysis/:engagementId (from EngagementDetail's "View
-  // Analysis" button), fetch the real engagement so we know its client_id
-  // for report generation. The financial charts/insights below are still
-  // mock data — that part hasn't been wired to the real /analyze endpoints
-  // yet, this is just enough to pass real client_id/engagement_id to
-  // Generate Report.
+  const [loading, setLoading] = useState(false);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [analysisData, setAnalysisData] = useState(null);
+  const [insights, setInsights] = useState(null);
+  const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | "saved" | "error"
+  const [submitStatus, setSubmitStatus] = useState(null); // null | "submitting" | "submitted" | "error"
+
+  // Optional engagement fetch — only used for the "Generate Report" button context
   useEffect(() => {
     if (!engagementId) {
       setEngagement(null);
@@ -215,251 +199,437 @@ export default function Analytics({ user }) {
       .catch((err) => console.error("Failed to load engagement", err));
   }, [engagementId]);
 
-  const data = scope === "full" ? MOCK_FULL : MOCK_EXPENSE_ONLY;
-  const { financial_summary: fs, ai_insights, analysis_scope } = data;
+  // Saved-view mode: load straight from the saved snapshot, no /analyze call
+  useEffect(() => {
+    if (!isSavedView) return;
+    setAnalysisData(savedAnalysis.analysis_data || null);
+    setInsights(savedAnalysis.insights_data || []);
+  }, [isSavedView, savedAnalysis]);
 
-  const deptData = fs.expense_by_department
-    ? Object.entries(fs.expense_by_department).map(([label, value]) => ({ label, value }))
-    : [];
+  // Live mode: real data fetch — runs whenever we have a real file_id + client_id from the pipeline
+  useEffect(() => {
+    if (isSavedView) return; // saved view already has its data, never re-runs /analyze
+    if (!fileId || !clientId) return;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const formData = new FormData();
+        formData.append("file_id", fileId);
+        formData.append("file_type", fileType || "general");
+        const response = await axios.post(`${API_BASE}/analyze/${clientId}`, formData);
+        setAnalysisData(response.data);
+      } catch (err) {
+        setError(err.response?.data?.detail || "Could not run financial analysis.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [fileId, clientId, fileType, isSavedView]);
 
-  const revenueValues = (fs.monthly_trend || []).map(d => d.revenue).filter(v => v != null);
-  const expenseValues = (fs.monthly_trend || []).map(d => d.expenses).filter(v => v != null);
+  const handleGenerateInsights = async () => {
+    if (!fileId || !clientId) return;
+    setInsightsLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file_id", fileId);
+      formData.append("file_type", fileType || "general");
+      const response = await axios.post(`${API_BASE}/analyze/${clientId}/insights`, formData);
+      setInsights(response.data.ai_insights || []);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not generate insights.");
+    } finally {
+      setInsightsLoading(false);
+    }
+  };
 
-  const showRevenue = analysis_scope === "full" || analysis_scope === "revenue_only";
-  const showExpenses = analysis_scope === "full" || analysis_scope === "expense_only";
-  const showProfit = analysis_scope === "full";
-  const showCharts = analysis_scope !== "undetermined";
+  // Persists the already-computed analysis + insights for this file so they
+  // can be revisited later without re-running /analyze. Only real data —
+  // requires analysisData to already exist, never falls back to a placeholder.
+  const handleSaveAnalysis = async () => {
+    if (!user || !analysisData || !fileId || !clientId) return;
+    setSaveStatus("saving");
+    try {
+      const formData = new FormData();
+      formData.append("user_id", user.user_id);
+      formData.append("client_id", clientId);
+      if (engagementId) formData.append("engagement_id", engagementId);
+      formData.append("file_id", fileId);
+      formData.append("file_type", fileType || "general");
+      formData.append("analysis_data", JSON.stringify(analysisData));
+      formData.append("insights_data", JSON.stringify(insights || []));
+      await saveAnalysis(formData);
+      setSaveStatus("saved");
+    } catch (err) {
+      console.error("Failed to save analysis:", err);
+      setSaveStatus("error");
+    }
+  };
+
+  const handleSubmitForReview = async () => {
+    if (!user || !fileId || !clientId) return;
+    setSubmitStatus("submitting");
+    try {
+      const wsRes = await openWorkspace({
+        user_id: user.user_id,
+        client_id: clientId,
+        file_id: fileId,
+      });
+      const ws = wsRes.data || wsRes;
+      if (!ws?.workspace_id) throw new Error("Could not resolve workspace");
+
+      await axios.post(`${API_BASE}/workspaces/${ws.workspace_id}/submit-for-review`, {
+        submitted_by: user.user_id,
+        notes: "",
+      });
+      setSubmitStatus("submitted");
+    } catch (err) {
+      console.error("Failed to submit for review:", err);
+      setSubmitStatus("error");
+    }
+  };
+
+  // If there's no real pipeline data and no saved analysis to view, fall back
+  // to a simple "no data" state instead of pretending with mock data
+  // Note: In saved view mode, we don't need fileId/clientId since we have the data directly
+  if (!isSavedView && (!fileId || !clientId)) {
+    return (
+      <div className="analysis">
+        <div className="state-panel">
+          <FileWarning size={28} color="var(--text-soft)" />
+          <h3>No file selected for analysis</h3>
+          <p>Please complete Upload → Mapping → Cleaning first, then proceed to Analysis from there.</p>
+          <button className="btn btn-primary" style={{ marginTop: "16px" }} onClick={() => navigate("/")}>
+            Go to Upload
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // In saved view mode, also validate that we have the required saved analysis data
+  if (isSavedView && (!savedAnalysis || !savedAnalysis.analysis_data)) {
+    return (
+      <div className="analysis">
+        <div className="state-panel">
+          <FileWarning size={28} color="var(--text-soft)" />
+          <h3>Saved analysis not found</h3>
+          <p>The saved analysis data could not be loaded. It may have been deleted or corrupted.</p>
+          <button className="btn btn-primary" style={{ marginTop: "16px" }} onClick={() => navigate("/analysis/history")}>
+            Back to History
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const analysisScope = analysisData?.analysis_scope;
+  const analysisBasis = analysisData?.analysis_basis; // "classified_accounts" or "generic_columns"
+  const financialAnalytics = analysisData?.financial_analytics;
+  const comparativeAnalytics = analysisData?.comparative_analytics;
+  const breakdowns = analysisData?.breakdowns || {};
+  const monthlyTrend = analysisData?.monthly_trend || {};
+
+  const isStatementBased = analysisBasis === "classified_accounts" && financialAnalytics;
+
+  // ── Build chart data from real financial_analytics (statement-based path) ──
+  const profitLoss = financialAnalytics?.profit_loss;
+  const ratios = financialAnalytics?.ratios;
+  const balanceSheetSummary = financialAnalytics?.balance_sheet_summary;
+  const expenseByCategory = financialAnalytics?.expense_breakdown?.by_category || {};
+  const revenueByCategory = financialAnalytics?.revenue_breakdown?.by_category || {};
+
+  const expenseDonutData = Object.entries(expenseByCategory).map(([label, v]) => ({ label, value: v.amount }));
+  const revenueDonutData = Object.entries(revenueByCategory).map(([label, v]) => ({ label, value: v.amount }));
+
+  const periodSummaries = comparativeAnalytics?.period_summaries || [];
+  const periodBarData = periodSummaries.map(p => ({
+    label: p.period,
+    revenue: p.total_revenue,
+    expenses: p.total_expenses,
+  }));
+  const latestComparison = comparativeAnalytics?.latest_period_comparison;
 
   return (
-    <div style={{ fontFamily: "inherit" }}>
+    <div className="analysis">
 
       {/* ── HEADER ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
+      <div className="page-title">
         <div>
-          <h1 style={{ fontSize: "22px", fontWeight: "700", color: "#1E3A5F", margin: 0 }}>Financial Analytics</h1>
-          <p style={{ fontSize: "14px", color: "#7f8c8d", margin: "4px 0 0" }}>
-            {data.file_type} · FY {data.period}
+          <h1>Financial Analytics</h1>
+          <p>
+            {isSavedView
+              ? `${savedAnalysis.company_name || "—"} · ${fileType || "—"}`
+              : `${uploadResult?.filename || "—"} · Client ${clientId}`}
           </p>
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <span style={{ fontSize: "12px", color: "#7f8c8d" }}>Mock scope:</span>
-          {["full", "expense_only"].map(s => (
-            <button key={s} onClick={() => setScope(s)} style={{
-              padding: "5px 12px", fontSize: "12px", borderRadius: "6px",
-              border: "1px solid #dce1e7",
-              background: scope === s ? "#1E3A5F" : "transparent",
-              color: scope === s ? "#fff" : "#5d6d7e",
-              cursor: "pointer", fontWeight: scope === s ? "600" : "400",
-            }}>{s}</button>
-          ))}
-          {engagement && (
-            <button
-              onClick={() => setShowGenerateModal(true)}
-              style={{
-                padding: "6px 14px", fontSize: "12px", borderRadius: "6px",
-                border: "none", background: "#2a78d6", color: "#fff",
-                cursor: "pointer", fontWeight: "600", marginLeft: "8px",
-              }}
-            >
-              Generate Report
+        <div className="page-actions">
+          {isSavedView ? (
+            <button className="btn btn-secondary" onClick={() => navigate("/analysis/history")}>
+              <ArrowLeft size={14} /> Back to History
             </button>
+          ) : (
+            <>
+              {analysisData && (
+                <>
+                  {saveStatus === "saved" && <span className="save-status save-status--ok">Saved</span>}
+                  {saveStatus === "error" && <span className="save-status save-status--error">Save failed</span>}
+                  <button className="btn btn-secondary" onClick={handleSaveAnalysis} disabled={saveStatus === "saving"}>
+                    {saveStatus === "saving" ? "Saving..." : "Save Analysis"}
+                  </button>
+
+                  {submitStatus === "submitted" ? (
+                    <span className="save-status save-status--ok">Submitted for review</span>
+                  ) : (
+                    <button className="btn btn-primary" onClick={handleSubmitForReview} disabled={submitStatus === "submitting"}>
+                      {submitStatus === "submitting" ? "Submitting..." : "Submit for Review"}
+                    </button>
+                  )}
+                  {submitStatus === "error" && <span className="save-status save-status--error">Submit failed</span>}
+                </>
+              )}
+              {engagement && (
+                <button className="btn btn-secondary" onClick={() => setShowGenerateModal(true)}>
+                  Generate Report
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
 
-      {engagement && (
-        <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "-16px 0 20px" }}>
-          Scoped to engagement: <strong>{engagement.engagement_name}</strong>
-          {engagement.company_name ? ` · ${engagement.company_name}` : ""}
-        </p>
-      )}
-
-      {/* ── SCOPE BANNER ── */}
-      {analysis_scope !== "full" && (
-        <div style={{ background: "#FEF9E7", border: "1px solid #FAC775", borderRadius: "8px", padding: "10px 16px", marginBottom: "20px", fontSize: "13px", color: "#7D6608" }}>
-          <strong>Partial data:</strong> {analysis_scope === "expense_only"
-            ? "Only expense data was detected in this file. Revenue and profit/loss charts are hidden until a revenue file is uploaded."
-            : "Could not determine the data type. Please check the uploaded file and ensure columns are correctly mapped."}
+      {/* Saved-snapshot attribution banner — who saved this and when */}
+      {isSavedView && (
+        <div className="banner banner--info" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <History size={14} />
+          Viewing a saved snapshot from {fmtDate(savedAnalysis.created_at)}
+          {savedAnalysis.saved_by_name ? ` — saved by ${savedAnalysis.saved_by_name}` : ""}
+          {savedAnalysis.engagement_name ? ` · ${savedAnalysis.engagement_name}` : ""}
         </div>
       )}
 
-      {/* ── KPI CARDS ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px", marginBottom: "24px" }}>
-        {showRevenue && (
-          <div style={{ background: "#fff", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
-            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Total Revenue</p>
-            <p style={{ fontSize: "22px", fontWeight: "700", color: "#1E3A5F", margin: "0 0 6px" }}>{fmtShort(fs.total_revenue)}</p>
-            {revenueValues.length > 1 && <Sparkline values={revenueValues} color="#2a78d6" />}
-          </div>
-        )}
-        {showExpenses && (
-          <div style={{ background: "#fff", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
-            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Total Expenses</p>
-            <p style={{ fontSize: "22px", fontWeight: "700", color: "#1E3A5F", margin: "0 0 6px" }}>{fmtShort(fs.total_expenses)}</p>
-            {expenseValues.length > 1 && <Sparkline values={expenseValues} color="#e34948" />}
-          </div>
-        )}
-        {showProfit && (
-          <div style={{ background: "#fff", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
-            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Net Profit</p>
-            <p style={{ fontSize: "22px", fontWeight: "700", color: fs.net_profit >= 0 ? "#27AE60" : "#E74C3C", margin: "0 0 4px" }}>
-              {fmtShort(fs.net_profit)}
-            </p>
-            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: 0 }}>
-              {fs.total_revenue ? Math.round((fs.net_profit / fs.total_revenue) * 100) : 0}% margin
-            </p>
-          </div>
-        )}
-      </div>
+      {loading && (
+        <div className="loading-row">
+          <Loader2 size={14} className="spin" />
+          Running financial analysis...
+        </div>
+      )}
+      {error && <div className="banner banner--error">{error}</div>}
 
-      {/* ── CHARTS ── */}
-      {showCharts && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "28px" }}>
-
-          {/* Monthly trend */}
-          {fs.monthly_trend && fs.monthly_trend.length > 0 && (
-            <div style={{ background: "#fff", borderRadius: "10px", padding: "20px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
-              <p style={{ fontSize: "14px", fontWeight: "600", color: "#1E3A5F", margin: "0 0 12px" }}>Monthly Trend</p>
-              <div style={{ display: "flex", gap: "16px", marginBottom: "12px" }}>
-                {showRevenue && <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#5d6d7e" }}><span style={{ width: "10px", height: "10px", borderRadius: "2px", background: "#2a78d6", display: "inline-block" }} />Revenue</span>}
-                {showExpenses && <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#5d6d7e" }}><span style={{ width: "10px", height: "10px", borderRadius: "2px", background: "#e34948", display: "inline-block" }} />Expenses</span>}
-              </div>
-              <BarChart
-                data={fs.monthly_trend}
-                keys={[showRevenue && "revenue", showExpenses && "expenses"].filter(Boolean)}
-                colors={[showRevenue && "#2a78d6", showExpenses && "#e34948"].filter(Boolean)}
-                height={140}
-              />
+      {analysisData && (
+        <>
+          {/* ── SCOPE BANNER ── */}
+          {!isStatementBased && (
+            <div className="banner banner--warning">
+              {analysisScope === "undetermined"
+                ? "Could not determine enough structure in this file to run financial analysis."
+                : "Showing generic column-based analysis. Accounting-aware statement analytics require account mapping to be completed for this file."}
             </div>
           )}
 
-          {/* Expense breakdown */}
-          {showExpenses && deptData.length > 0 && (
-            <div style={{ background: "#fff", borderRadius: "10px", padding: "20px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
-              <p style={{ fontSize: "14px", fontWeight: "600", color: "#1E3A5F", margin: "0 0 16px" }}>Expense Breakdown</p>
-              <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-                <DonutChart data={deptData} colors={CHART_COLORS} size={150} />
-                <div style={{ flex: 1 }}>
-                  {deptData.map((d, i) => {
-                    const total = deptData.reduce((s, x) => s + x.value, 0);
-                    const pct = Math.round((d.value / total) * 100);
+          {/* ═══════════════════ STATEMENT-BASED VIEW (trial balance / general ledger) ═══════════════════ */}
+          {isStatementBased && (
+            <>
+              {/* KPI CARDS */}
+              <div className="kpi-grid">
+                <div className="kpi-card">
+                  <h4>Revenue</h4>
+                  <h2>{fmtShort(profitLoss?.total_revenue)}</h2>
+                </div>
+                <div className="kpi-card">
+                  <h4>Net Profit</h4>
+                  <h2 data-trend={trendOf(profitLoss?.net_profit)}>{fmtShort(profitLoss?.net_profit)}</h2>
+                </div>
+                <div className="kpi-card">
+                  <h4>Working Capital</h4>
+                  <h2>{fmtShort(balanceSheetSummary?.working_capital)}</h2>
+                </div>
+              </div>
+
+              {/* KEY RATIOS */}
+              <div className="dashboard-section">
+                <div className="section-header"><h2>Key Ratios</h2></div>
+                <div className="ratio-grid">
+                  {[
+                    ["Current Ratio", ratios?.current_ratio],
+                    ["Debt Ratio", ratios?.debt_ratio != null ? `${ratios.debt_ratio}%` : "—"],
+                    ["Gross Margin", fmtPct(ratios?.gross_margin)],
+                    ["Operating Margin", fmtPct(ratios?.operating_margin)],
+                    ["Net Margin", fmtPct(ratios?.net_margin)],
+                    ["Debt to Equity", ratios?.debt_to_equity],
+                  ].map(([label, val]) => (
+                    <div key={label} className="ratio-item">
+                      <h5>{label}</h5>
+                      <p>{val ?? "—"}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* COMPARATIVE ANALYTICS */}
+              {comparativeAnalytics?.available && (
+                <div className="dashboard-section">
+                  <div className="section-header"><h2>Comparative Analytics</h2></div>
+
+                  {latestComparison && (
+                    <div className="comparison-grid">
+                      {[
+                        ["Revenue Change", latestComparison.revenue_change_pct],
+                        ["Expense Change", latestComparison.expense_change_pct],
+                        ["Net Profit Change", latestComparison.net_profit_change_pct],
+                      ].map(([label, val]) => (
+                        <div key={label} className="comparison-item">
+                          <h5>{label}</h5>
+                          <p data-trend={trendOf(val)}>{val != null ? `${val >= 0 ? "+" : ""}${val}%` : "—"}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {periodBarData.length > 0 && (
+                    <div style={{ marginBottom: "16px" }}>
+                      <BarChart data={periodBarData} keys={["revenue", "expenses"]} colors={["#2a78d6", "#e34948"]} height={140} />
+                    </div>
+                  )}
+
+                  <div className="section-header" style={{ marginBottom: "8px" }}>
+                    <h2 style={{ fontSize: "13px" }}>Period Summary</h2>
+                  </div>
+                  <div className="data-table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Period</th>
+                          <th>Revenue</th>
+                          <th>Expenses</th>
+                          <th>Net Profit</th>
+                          <th>Gross Margin</th>
+                          <th>Net Margin</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {periodSummaries.map((p) => (
+                          <tr key={p.period}>
+                            <td className="label-cell">{p.period}</td>
+                            <td>{fmtShort(p.total_revenue)}</td>
+                            <td>{fmtShort(p.total_expenses)}</td>
+                            <td>{fmtShort(p.net_profit)}</td>
+                            <td>{fmtPct(p.gross_margin)}</td>
+                            <td>{fmtPct(p.net_margin)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* EXPENSE / REVENUE BREAKDOWN */}
+              <div className="chart-grid" style={{ marginBottom: "28px" }}>
+                {expenseDonutData.length > 0 && (
+                  <div className="chart-card">
+                    <h3>Expense Breakdown</h3>
+                    <DonutPanel data={expenseDonutData} />
+                  </div>
+                )}
+                {revenueDonutData.length > 0 && (
+                  <div className="chart-card">
+                    <h3>Revenue Breakdown</h3>
+                    <DonutPanel data={revenueDonutData} />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ═══════════════════ GENERIC VIEW (non-ledger files) ═══════════════════ */}
+          {!isStatementBased && Object.keys(breakdowns).length > 0 && (
+            <div className="dashboard-section">
+              <div className="section-header"><h2>Breakdowns</h2></div>
+              {Object.entries(breakdowns).map(([key, data]) => (
+                <div key={key} style={{ marginBottom: "16px" }}>
+                  <p style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-soft)", margin: "0 0 8px" }}>
+                    {key.replace(/_/g, " ")}
+                  </p>
+                  <div className="data-table-wrap">
+                    <table className="data-table">
+                      <tbody>
+                        {Object.entries(data).sort((a, b) => b[1] - a[1]).map(([label, val]) => (
+                          <tr key={label}>
+                            <td>{label}</td>
+                            <td className="num-cell" style={{ fontWeight: 600 }}>{fmt(val)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── AI INSIGHTS (preview) ── */}
+          <div>
+            <div className="insights-toolbar">
+              <div>
+                <h2>AI Insights</h2>
+                <p>Generate plain-language explanations of the numbers above using AI.</p>
+              </div>
+              {!insights && !isSavedView && (
+                <button className="btn btn-primary" onClick={handleGenerateInsights} disabled={insightsLoading}>
+                  {insightsLoading ? "Generating..." : "Generate Insights"}
+                </button>
+              )}
+            </div>
+
+            {insights && insights.length === 0 && (
+              <p style={{ fontSize: "13px", color: "var(--text-soft)" }}>No notable insights found for this data.</p>
+            )}
+
+            {insights && insights.length > 0 && (
+              <>
+                <div className="insight-grid">
+                  {insights.slice(0, 6).map((insight, i) => {
+                    const cfg = SEVERITY_CONFIG[insight.type] || SEVERITY_CONFIG[insight.severity] || SEVERITY_CONFIG.info;
+                    const IconComponent = cfg.icon;
+
                     return (
-                      <div key={d.label} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                        <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
-                        <span style={{ fontSize: "12px", color: "#5d6d7e", flex: 1 }}>{d.label}</span>
-                        <span style={{ fontSize: "12px", fontWeight: "600", color: "#1E3A5F" }}>{pct}%</span>
-                        <span style={{ fontSize: "11px", color: "#95a5a6" }}>{fmtShort(d.value)}</span>
+                      <div key={i} className="insight-card">
+                        <div className="insight-card-body">
+                          <div className="insight-card-head">
+                            <IconComponent size={18} className="insight-icon" data-tone={cfg.tone} />
+                            <span className="insight-tag">{cfg.label}</span>
+                          </div>
+                          <p className="insight-message">{insight.message}</p>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* ── AI INSIGHTS ── */}
-      {ai_insights && ai_insights.length > 0 && (
-        <div>
-          <div style={{ marginBottom: "16px" }}>
-            <h2 style={{ fontSize: "16px", fontWeight: "700", color: "#1E3A5F", margin: "0 0 4px" }}>AI Insights & Recommendations</h2>
-            <p style={{ fontSize: "13px", color: "#7f8c8d", margin: 0 }}>
-              Click any insight to expand the full analysis and recommended actions.
-            </p>
+                <button
+                  className="btn btn-secondary"
+                  style={{ marginTop: "16px" }}
+                  onClick={() =>
+                    navigate("/insights", {
+                      state: {
+                        insights,
+                        clientId,
+                        fileId,
+                        engagementId,
+                        filename: uploadResult?.filename,
+                      },
+                    })
+                  }
+                >
+                  View all {insights.length} insights <ArrowRight size={14} />
+                </button>
+              </>
+            )}
           </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {ai_insights.map((insight, i) => {
-              const cfg = SEVERITY_CONFIG[insight.severity] || SEVERITY_CONFIG[insight.type] || SEVERITY_CONFIG.info;
-              const isExpanded = expandedInsight === i;
-
-              return (
-                <div key={i} style={{
-                  background: cfg.bg,
-                  border: `1px solid ${cfg.border}`,
-                  borderRadius: "10px",
-                  overflow: "hidden",
-                  transition: "box-shadow 0.15s",
-                }}>
-                  {/* Insight header — always visible, click to expand */}
-                  <div
-                    onClick={() => setExpandedInsight(isExpanded ? null : i)}
-                    style={{
-                      padding: "14px 16px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span style={{ fontSize: "20px", flexShrink: 0 }}>{cfg.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
-                        <span style={{
-                          fontSize: "10px", fontWeight: "700", textTransform: "uppercase",
-                          letterSpacing: "0.06em", color: cfg.tag,
-                          background: cfg.tagBg, padding: "2px 8px", borderRadius: "20px",
-                        }}>{cfg.label}</span>
-                      </div>
-                      <p style={{ fontSize: "14px", fontWeight: "600", color: "#1E3A5F", margin: 0 }}>
-                        {insight.title || insight.message}
-                      </p>
-                    </div>
-                    <span style={{ fontSize: "14px", color: cfg.tag, flexShrink: 0 }}>
-                      {isExpanded ? "▲" : "▼"}
-                    </span>
-                  </div>
-
-                  {/* Expanded content — narrative + guideline */}
-                  {isExpanded && (
-                    <div style={{ padding: "0 16px 18px", borderTop: `1px solid ${cfg.border}` }}>
-
-                      {/* Narrative */}
-                      <div style={{ marginTop: "14px" }}>
-                        <p style={{
-                          fontSize: "11px", fontWeight: "700", textTransform: "uppercase",
-                          letterSpacing: "0.06em", color: cfg.tag, margin: "0 0 6px",
-                        }}>Analysis</p>
-                        <p style={{ fontSize: "13px", color: "#2c3e50", lineHeight: "1.65", margin: 0 }}>
-                          {insight.narrative || insight.message}
-                        </p>
-                      </div>
-
-                      {/* Guideline */}
-                      {insight.guideline && (
-                        <div style={{
-                          marginTop: "14px",
-                          background: "#fff",
-                          border: `1px solid ${cfg.border}`,
-                          borderRadius: "8px",
-                          padding: "12px 14px",
-                        }}>
-                          <p style={{
-                            fontSize: "11px", fontWeight: "700", textTransform: "uppercase",
-                            letterSpacing: "0.06em", color: cfg.tag, margin: "0 0 6px",
-                          }}>💡 Recommended Action</p>
-                          <p style={{ fontSize: "13px", color: "#2c3e50", lineHeight: "1.65", margin: 0 }}>
-                            {insight.guideline}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Undetermined state */}
-      {analysis_scope === "undetermined" && (
-        <div style={{ textAlign: "center", padding: "48px 24px", color: "#7f8c8d" }}>
-          <p style={{ fontSize: "32px", margin: "0 0 12px" }}>?</p>
-          <p style={{ fontSize: "15px", fontWeight: "600", color: "#5d6d7e", margin: "0 0 6px" }}>Could not determine data type</p>
-          <p style={{ fontSize: "13px", margin: 0 }}>Upload a file with clearer financial structure to generate insights.</p>
-        </div>
+        </>
       )}
 
       {showGenerateModal && engagement && (

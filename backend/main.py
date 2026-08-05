@@ -1,5 +1,5 @@
 # Core FastAPI imports for building the API, handling file uploads, and raising errors
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, APIRouter
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, APIRouter, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
@@ -32,19 +32,23 @@ import io
 from dotenv import load_dotenv
 
 # AI detection helpers, used to identify columns and suggest file types
-from detector import detect_columns_with_llm, build_detection_result, suggest_file_type
+from detector import detect_columns_with_llm, build_detection_result, suggest_file_type, FILE_TYPE_CATEGORIES
 
 # Shared JWT auth dependency (decodes token, restricts routes by role)
 from auth import require_role
 
 # Database helper functions for mappings, uploads, corrections, snapshots, and acknowledgments
 from database import (
-    init_db, get_db, save_mapping, get_mapping, save_upload, get_uploads,
+    init_db, get_db, get_connection, save_mapping, get_mapping, save_upload, get_uploads,
     save_cleaning_acknowledgment, get_acknowledged_issue_ids,
     save_cleaning_corrections, get_cleaning_corrections,
     save_fingerprint, get_fingerprint,
     save_cleaning_snapshot, get_cleaning_snapshot,
     save_cleaned_registry, get_cleaned_files_for_client, get_cleaned_file_data,
+    save_analysis, get_saved_analyses, get_saved_analysis, delete_saved_analysis,
+    get_saved_analyses_for_engagement, get_saved_analyses_for_file,
+    get_or_create_workspace, get_workspace_by_id, update_workspace_data, get_engagement_workspaces, get_user_workspaces,
+    get_workflow_stage, update_workflow_stage, mark_workflow_step_completed, initialize_workflow_stage,
 )
 
 # Cleaning engine, Excel export, and Excel diff logic
@@ -277,7 +281,11 @@ def compute_schema_fingerprint(columns: list) -> str:
     return fingerprint
 
 # Find an uploaded file on disk by its file_id, trying each allowed extension
-def locate_uploaded_file(file_id: str):
+def locate_uploaded_file(file_id: str, preferred_ext=None):
+    if preferred_ext and preferred_ext in ALLOWED_EXTENSIONS:
+        path = os.path.join(UPLOAD_DIR, f"{file_id}.{preferred_ext}")
+        if os.path.exists(path):
+            return path, preferred_ext
     for extension in ALLOWED_EXTENSIONS:
         path = os.path.join(UPLOAD_DIR, f"{file_id}.{extension}")
         if os.path.exists(path):
@@ -446,12 +454,24 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     report["can_proceed"] = report["total_issues"] == 0
     # Save the current cleaned state so the auditor can retun to it and also download
     save_cleaned_registry(file_id, client_id, file_type, cleaned_df, report)
+    # Initialize workflow stage when file is successfully cleaned
+    if report["can_proceed"]:
+        initialize_workflow_stage(file_id, client_id, file_type)
     return cleaned_df, report
 
+# Function to build financial analysis context
 def build_financial_analysis_context(cleaned_df: pd.DataFrame, mapping: dict, client_id: str, file_type: str) -> dict:
-    breakdowns = calculate_breakdowns(cleaned_df, mapping)
-    monthly_trend = calculate_monthly_trend(cleaned_df, mapping)
-    anomalies = detect_anomalies(monthly_trend)
+    is_ledger_file = file_type in ("trial_balance", "general_ledger")
+
+    if is_ledger_file:
+        breakdowns = {}
+        monthly_trend = {}
+        anomalies = []
+    else:
+        breakdowns = calculate_breakdowns(cleaned_df, mapping)
+        monthly_trend = calculate_monthly_trend(cleaned_df, mapping)
+        anomalies = detect_anomalies(monthly_trend)
+
     generic_scope = determine_analysis_scope(breakdowns, monthly_trend)
 
     context = {
@@ -714,7 +734,8 @@ def root():
 @app.post("/upload")
 async def upload_file_ai(
     file: UploadFile = File(...),
-    client_id: str = Form(...)
+    client_id: str = Form(...),
+    section_id: int = Form(None)
 ):
     ext = get_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
@@ -735,7 +756,7 @@ async def upload_file_ai(
         df, source = extract_pdf(save_path)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not extract any content from PDF.")
-        save_upload(file_id, client_id, file.filename, ext, len(df))
+        save_upload(file_id, client_id, file.filename, ext, len(df), section_id)
         fill_rates = calculate_fill_rates(df)
         return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": source,
                 "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
@@ -746,7 +767,7 @@ async def upload_file_ai(
         df, source = extract_docx(save_path)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not extract any content from DOCX.")
-        save_upload(file_id, client_id, file.filename, ext, len(df))
+        save_upload(file_id, client_id, file.filename, ext, len(df), section_id)
         fill_rates = calculate_fill_rates(df)
         return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": source,
                 "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
@@ -764,12 +785,202 @@ async def upload_file_ai(
         df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
-    save_upload(file_id, client_id, file.filename, ext, len(df))
+    save_upload(file_id, client_id, file.filename, ext, len(df), section_id)
     fill_rates = calculate_fill_rates(df)
     return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": "table",
             "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
             "fingerprint": compute_schema_fingerprint(list(df.columns)),
             "preview": df.head(5).fillna("").to_dict(orient="records"), "message": "File uploaded and processed successfully"}
+
+
+
+
+# Debug endpoint to check notifications for a specific user
+@app.get("/test/user/{user_id}/notifications")
+def check_user_notifications(user_id: int, db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT * FROM notifications 
+        WHERE user_id = %s 
+        ORDER BY created_at DESC
+    """, (user_id,))
+    notifications = cursor.fetchall()
+    return {
+        "user_id": user_id,
+        "notifications": notifications,
+        "count": len(notifications)
+    }
+
+
+# Get file preview by file_id for notifications
+@app.get("/file-preview/{file_id}")
+def get_file_preview(file_id: str, client_id: str = Query(...), db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+    
+    cursor.execute("""
+        SELECT file_id, filename, row_count, file_type, semantic_file_type 
+        FROM uploads 
+        WHERE file_id = %s AND client_id = %s
+    """, (file_id, client_id))
+    
+    upload = cursor.fetchone()
+    
+    if not upload:
+        # Return a graceful response instead of 404 for deleted/non-existent files
+        return {
+            "file_id": file_id,
+            "filename": None,
+            "rows": 0,
+            "columns": [],
+            "preview": [],
+            "file_type": None,
+            "semantic_file_type": None,
+            "error": "File not found in uploads table. It may have been deleted."
+        }
+    
+    # Try to load the file and get preview data
+    try:
+        file_path = os.path.join(UPLOAD_DIR, f"{file_id}.{upload['file_type']}")
+        if upload['file_type'] == 'csv':
+            df = pd.read_csv(file_path, dtype=str)
+        else:
+            df = pd.read_excel(file_path, dtype=str)
+        
+        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
+        df = df.dropna(axis=1, how='all')
+        df = df.loc[:, ~(df == '').all()]
+        
+        result = {
+            "file_id": upload['file_id'],
+            "filename": upload['filename'],
+            "rows": len(df),
+            "columns": list(df.columns),
+            "preview": df.head(5).fillna("").to_dict(orient="records"),
+            "file_type": upload['file_type'],
+            "semantic_file_type": upload.get('semantic_file_type')
+        }
+        return result
+    except Exception as e:
+        return {
+            "file_id": upload['file_id'],
+            "filename": upload['filename'],
+            "rows": upload['row_count'],
+            "columns": [],
+            "preview": [],
+            "file_type": upload['file_type'],
+            "semantic_file_type": upload.get('semantic_file_type'),
+            "error": str(e)
+        }
+
+# Simple endpoint to list all clients with their IDs
+@app.get("/test/clients")
+def list_all_clients(db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT client_id, company_name FROM clients")
+    clients = cursor.fetchall()
+    return {"clients": clients}
+
+# Test endpoint to check engagement and team setup for a client
+@app.get("/test/client/{client_id}/engagement")
+def test_client_engagement(client_id: int, db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+    
+    # Get engagement and team in a single query
+    cursor.execute("""
+        SELECT 
+            e.engagement_id, 
+            e.engagement_name,
+            u.user_id,
+            u.full_name,
+            u.role
+        FROM engagements e
+        LEFT JOIN engagement_team et ON e.engagement_id = et.engagement_id
+        LEFT JOIN users u ON et.user_id = u.user_id
+        WHERE e.client_id = %s
+    """, (client_id,))
+    
+    results = cursor.fetchall()
+    
+    if not results or not results[0]['engagement_id']:
+        return {"error": "No engagement found for this client", "client_id": client_id}
+    
+    engagement = {
+        "engagement_id": results[0]['engagement_id'],
+        "engagement_name": results[0]['engagement_name']
+    }
+    
+    team = []
+    for row in results:
+        if row['user_id']:
+            team.append({
+                "user_id": row['user_id'],
+                "full_name": row['full_name'],
+                "role": row['role']
+            })
+    
+    return {
+        "engagement": engagement,
+        "team": team,
+        "team_count": len(team)
+    }
+
+# Submit an uploaded file for auditor review - creates notification for assigned auditor
+@app.post("/upload/submit")
+async def submit_uploaded_file(
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    submitted_by: int = Form(...),
+    db=Depends(get_db)
+):
+    cursor = db.cursor(dictionary=True)
+    
+    # Find the engagement for this client
+    cursor.execute("""
+        SELECT engagement_id, engagement_name 
+        FROM engagements 
+        WHERE client_id = %s 
+        LIMIT 1
+    """, (int(client_id),))
+    
+    engagement = cursor.fetchone()
+    print(f"DEBUG: Engagement found: {engagement}")
+    
+    if engagement:
+        # Find auditors in the engagement team (same approach as engagement notifications)
+        cursor.execute("""
+            SELECT u.user_id, u.full_name 
+            FROM users u
+            INNER JOIN engagement_team et ON u.user_id = et.user_id
+            WHERE et.engagement_id = %s 
+            AND u.role IN ('Auditor', 'Senior Auditor', 'Assistant Manager', 'Audit Manager', 'Engagement Partner', 'Quality Reviewer')
+        """, (engagement['engagement_id'],))
+        
+        auditors = cursor.fetchall()
+        print(f"DEBUG: Auditors found: {auditors}")
+        
+        if auditors:
+            # Create notification for each auditor in the team with file details
+            message = f"New file submitted. Please review and then proceed to the Detect phase."
+            for auditor in auditors:
+                print(f"DEBUG: Creating notification for user_id={auditor['user_id']}")
+                cursor.execute("""
+                    INSERT INTO notifications (user_id, message, type, file_id, client_id) 
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (auditor['user_id'], message, 'file_submission', file_id, client_id))
+            
+            # Update upload status
+            cursor.execute("""
+                UPDATE uploads SET status = 'Submitted' 
+                WHERE file_id = %s AND client_id = %s
+            """, (file_id, client_id))
+            
+            db.commit()
+            print(f"DEBUG: Successfully submitted and notified {len(auditors)} auditors")
+            return {"message": "File submitted successfully", "notified_auditors": len(auditors)}
+    
+    print(f"DEBUG: No engagement or auditors found")
+    return {"message": "File submitted but no engagement or auditor found for this client"}
+
 
 # Detect what each column in an uploaded file means, reusing a saved mapping or
 # fingerprint cache when possible, and falling back to LLM detection otherwise
@@ -829,7 +1040,7 @@ async def detect_columns_endpoint(
     # Save this schema's fingerprint so future uploads with the same columns can be recognized
     computed_fingerprint = compute_schema_fingerprint(columns_list)
     save_fingerprint(client_id, computed_fingerprint, effective_file_type, columns_list)
-    saved_mapping = get_mapping(client_id, effective_file_type)
+    saved_mapping = get_mapping(client_id, effective_file_type, computed_fingerprint)
     existing_fp = get_fingerprint(client_id, computed_fingerprint, effective_file_type)
 
     # Fingerprint cache hit: only trust this if every uploaded column actually
@@ -857,9 +1068,10 @@ async def detect_columns_endpoint(
             result = build_detection_result(columns_list, filtered_mapping, sample_values, fill_rates_dict)
             result["file_id"] = file_id
             result["source"] = "saved_mapping"
-            result["message"] = "Mapping loaded from saved client profile — LLM skipped."
-            result["suggested_file_type"] = file_type_suggestion["file_type"]
-            result["suggested_file_type_label"] = file_type_suggestion["file_type_label"]
+            result["message"] = "This mapping was loaded from this client's saved profile. Review, change and confirm as needed."
+            # Return the actual saved file_type instead of suggestion
+            result["suggested_file_type"] = effective_file_type
+            result["suggested_file_type_label"] = FILE_TYPE_CATEGORIES.get(effective_file_type, effective_file_type)
             return result
 
     # No usable cache found: run LLM detection on the columns
@@ -934,7 +1146,8 @@ async def save_mapping_endpoint(
     file_type: str = Form(...),
     mapping: str = Form(...),
     file_id: str = Form(None),
-    confirmed_by: str = Form(None)
+    confirmed_by: str = Form(None),
+    fingerprint: str = Form(None)
 ):
     try:
         mapping_dict = json.loads(mapping)
@@ -964,7 +1177,21 @@ async def save_mapping_endpoint(
                 # saving entirely — this check is a safety net, not the source of truth
                 pass
 
-    save_mapping(client_id, file_type, mapping_dict, confirmed_by)
+    save_mapping(client_id, file_type, mapping_dict, confirmed_by, fingerprint)
+    
+    # Also update the uploads table with the semantic file_type for future reference
+    if file_id:
+        db = get_connection()
+        cursor = db.cursor()
+        cursor.execute("UPDATE uploads SET semantic_file_type = %s WHERE file_id = %s", (file_type, file_id))
+        db.commit()
+        cursor.close()
+        db.close()
+    
+    # Update workflow stage to 'mapped' when mapping is saved
+    if file_id:
+        update_workflow_stage(file_id, client_id, file_type, "mapped")
+    
     return {"client_id": client_id, "file_type": file_type, "columns_saved": len(mapping_dict),
             "message": f"Mapping saved successfully for client {client_id} and file type {file_type}."}
 
@@ -1168,7 +1395,7 @@ async def submit_corrected_excel(
                     else "text"
                 ),
             }
-        save_mapping(client_id, file_type, updated_mapping, corrected_by)
+        save_mapping(client_id, file_type, updated_mapping, corrected_by, None)
         mapping = updated_mapping
 
     # Re-clean the file with all corrections applied, then refresh the snapshot
@@ -1884,12 +2111,16 @@ def create_user(u: User, db=Depends(get_db)):
         cursor.execute(
             """INSERT INTO users (full_name, email, password_hash, phone, role, assigned_client_id, status)
                VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            (u.full_name, u.email, hashed, u.phone, u.role, u.assigned_client_id, u.status)
+            (u.full_name, u.email, hashed, u.phone or None, u.role, u.assigned_client_id, u.status)
         )
         db.commit()
         return {"user_id": cursor.lastrowid, "message": "User created"}
-    except Exception:
-        raise HTTPException(status_code=400, detail="Email already exists")
+    except Exception as e:
+        error_msg = str(e)
+        if "Duplicate entry" in error_msg and "email" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Email already exists")
+        else:
+            raise HTTPException(status_code=400, detail=f"Failed to create user: {error_msg}")
 
 # Update an existing user's details (does not change the password)
 @app.put("/users/{user_id}")
@@ -1998,6 +2229,43 @@ The Audit AI Team"""
 # Return everything needed to resume work on a file from the Client Details page.
 # Reads the actual file from disk to get columns and fill_rates so MappingPage
 # can run detection correctly on resume, exactly as a fresh upload would.
+# Mark workflow steps as completed
+@app.post("/workflow/complete-step")
+async def complete_workflow_step(
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form(...),
+    step: str = Form(...),
+    next_stage: str = Form(None)
+):
+    """
+    Mark a workflow step as completed and optionally move to the next stage.
+    step can be: 'tb_validation', 'account_mapping', 'financial_analysis'
+    """
+    try:
+        mark_workflow_step_completed(file_id, client_id, file_type, step)
+        
+        if next_stage:
+            update_workflow_stage(file_id, client_id, file_type, next_stage)
+        
+        return {"message": f"Step {step} marked as completed", "next_stage": next_stage}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/workflow/stage/{file_id}")
+async def get_workflow_stage_endpoint(file_id: str, client_id: str, file_type: str = "general"):
+    """
+    Get the current workflow stage for a file.
+    """
+    try:
+        workflow = get_workflow_stage(file_id, client_id, file_type)
+        if not workflow:
+            return {"current_stage": None, "tb_validation_completed": False, 
+                    "account_mapping_completed": False, "financial_analysis_completed": False}
+        return workflow
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/files/{file_id}/resume-state")
 def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
@@ -2006,9 +2274,29 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     cursor.execute("SELECT * FROM uploads WHERE file_id = %s AND client_id = %s", (file_id, client_id))
     upload = cursor.fetchone()
     if not upload:
-        raise HTTPException(status_code=404, detail="Upload not found")
+        # Return a graceful response instead of 404 for deleted/non-existent files
+        return {
+            "file_id": file_id,
+            "client_id": client_id,
+            "filename": None,
+            "file_type": None,
+            "row_count": 0,
+            "columns": [],
+            "fill_rates": {},
+            "fingerprint": None,
+            "upload_time": None,
+            "stage": "file_not_found",
+            "has_mapping": False,
+            "has_corrections": False,
+            "total_issues": None,
+            "can_proceed": False,
+            "last_cleaned_at": None,
+            "workflow": None,
+            "error": "File not found in uploads table. It may have been deleted."
+        }
 
-    file_type = upload.get("file_type") or "other"
+    # Use semantic_file_type if available, otherwise fall back to file_type
+    file_type = upload.get("semantic_file_type") or upload.get("file_type") or "other"
     filename = upload.get("filename") or upload.get("file_name") or ""
 
     # Read the actual file from disk to get columns and fill_rates
@@ -2016,7 +2304,9 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     fill_rates = {}
     fingerprint = ""
     row_count = upload.get("row_count") or 0
-    save_path, file_ext = locate_uploaded_file(file_id)
+    # Use the original file extension from upload record if available
+    original_ext = upload.get("file_type") if upload.get("file_type") in ALLOWED_EXTENSIONS else None
+    save_path, file_ext = locate_uploaded_file(file_id, original_ext)
     if save_path:
         try:
             df = read_file_to_df(save_path, file_ext)
@@ -2031,7 +2321,16 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     # The uploads table stores the file extension (e.g. 'xlsx'), not the mapped
     # category (e.g. 'general_ledger'). Resolve the real file_type by finding
     # which column_mappings entry covers the most columns from this file.
-    if columns:
+    # First check if this file already has a workflow record — its file_type is authoritative
+    cursor.execute(
+        "SELECT file_type FROM workflow_stages WHERE file_id = %s AND client_id = %s",
+        (file_id, client_id)
+    )
+    existing_workflow_row = cursor.fetchone()
+    if existing_workflow_row:
+        file_type = existing_workflow_row["file_type"]
+    elif columns:
+        # No workflow record yet — guess file_type by column overlap
         placeholders = ",".join(["%s"] * len(columns))
         cursor.execute(
             f"SELECT file_type, COUNT(*) AS cnt FROM column_mappings "
@@ -2043,12 +2342,23 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
         if ft_row:
             file_type = ft_row["file_type"]
 
-    # Check if a mapping exists
-    cursor.execute(
-        "SELECT COUNT(*) AS cnt FROM column_mappings WHERE client_id = %s AND file_type = %s",
-        (client_id, file_type)
-    )
-    has_mapping = cursor.fetchone()["cnt"] > 0
+    # Check if a mapping exists for this client and file fingerprint
+    # If no fingerprint available, fall back to file_type check
+    # If a workflow row already exists, mapping obviously happened — trust that over brittle fingerprint match
+    if existing_workflow_row:
+        has_mapping = True
+    elif fingerprint:
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM column_mappings WHERE client_id = %s AND fingerprint = %s",
+            (client_id, fingerprint)
+        )
+        has_mapping = cursor.fetchone()["cnt"] > 0
+    else:
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM column_mappings WHERE client_id = %s AND file_type = %s",
+            (client_id, file_type)
+        )
+        has_mapping = cursor.fetchone()["cnt"] > 0
 
     # Check cleaned registry
     cursor.execute(
@@ -2064,16 +2374,41 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     )
     has_corrections = cursor.fetchone()["cnt"] > 0
 
-    # Determine stage
-    if cleaned and cleaned["can_proceed"]:
-        stage = "clean"
-    elif cleaned and not cleaned["can_proceed"]:
-        stage = "cleaning_in_progress"
-    elif has_mapping:
-        stage = "mapped"
-    else:
-        stage = "uploaded"
+    # Initialize workflow variable
+    workflow = None
 
+    # Determine stage - mapping is shared across files of same type, but cleaning is file-specific
+    if not has_mapping:
+        stage = "uploaded"
+    elif cleaned:
+        # This specific file has been through cleaning
+        # Always check workflow stage if file has been cleaned
+        workflow = get_workflow_stage(file_id, client_id, file_type)
+        if workflow and workflow["current_stage"]:
+            # Use the workflow stage if it exists
+            stage = workflow["current_stage"]
+        elif cleaned["can_proceed"]:
+            # If no workflow stage but can proceed, initialize it
+            initialize_workflow_stage(file_id, client_id, file_type)
+            workflow = get_workflow_stage(file_id, client_id, file_type)
+            if workflow and workflow["current_stage"]:
+                stage = workflow["current_stage"]
+            else:
+                # Fallback to clean if initialization failed
+                stage = "clean"
+        else:
+            # File has issues and no workflow stage
+            stage = "cleaning_in_progress"
+    else:
+        # Mapping exists but this specific file hasn't been cleaned yet
+        stage = "mapped"
+
+    # Get workflow stage data if file is cleaned or in workflow
+    if not workflow and stage in ["clean", "tb_validation", "account_mapping", "financial_analysis", "analysis"]:
+        workflow_data = get_workflow_stage(file_id, client_id, file_type)
+        if workflow_data:
+            workflow = workflow_data
+    
     return {
         "file_id": file_id,
         "client_id": client_id,
@@ -2090,6 +2425,7 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
         "total_issues": cleaned["total_issues"] if cleaned else None,
         "can_proceed": bool(cleaned["can_proceed"]) if cleaned else False,
         "last_cleaned_at": str(cleaned["updated_at"]) if cleaned else None,
+        "workflow": workflow,
     }
 
 # Generate a password reset token for a user's email and store it with a one hour expiry
@@ -2351,16 +2687,26 @@ def delete_audit_section(section_id: int, db=Depends(get_db)):
 
 # Get the most recent submission for a single audit section, or none if it has never been submitted
 @app.get("/audit-sections/{section_id}/latest-submission")
-def get_section_latest_submission(section_id: int, db=Depends(get_db)):
+def get_section_latest_submission(section_id: int, file_id: str = Query(None), db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT s.*, u.full_name as submitted_by_name "
-        "FROM submissions s "
-        "LEFT JOIN users u ON s.submitted_by = u.user_id "
-        "WHERE s.section_id = %s "
-        "ORDER BY s.created_at DESC LIMIT 1",
-        (section_id,)
-    )
+    if file_id:
+        cursor.execute(
+            "SELECT s.*, u.full_name as submitted_by_name "
+            "FROM submissions s "
+            "LEFT JOIN users u ON s.submitted_by = u.user_id "
+            "WHERE s.section_id = %s AND s.file_id = %s "
+            "ORDER BY s.created_at DESC LIMIT 1",
+            (section_id, file_id)
+        )
+    else:
+        cursor.execute(
+            "SELECT s.*, u.full_name as submitted_by_name "
+            "FROM submissions s "
+            "LEFT JOIN users u ON s.submitted_by = u.user_id "
+            "WHERE s.section_id = %s "
+            "ORDER BY s.created_at DESC LIMIT 1",
+            (section_id,)
+        )
     row = cursor.fetchone()
     return row if row else None
 
@@ -2393,6 +2739,76 @@ def get_submission(submission_id: int, db=Depends(get_db)):
     submission = cursor.fetchone()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
+    return submission
+
+# Get comprehensive review data for a submission
+@app.get("/submissions/{submission_id}/review-data")
+def get_submission_review_data(submission_id: int, db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT s.*, u.full_name as submitted_by_name, e.engagement_name, e.client_id,
+               sec.section_name
+        FROM submissions s
+        LEFT JOIN users u ON s.submitted_by = u.user_id
+        LEFT JOIN engagements e ON s.engagement_id = e.engagement_id
+        LEFT JOIN audit_sections sec ON s.section_id = sec.section_id
+        WHERE s.submission_id = %s
+    """, (submission_id,))
+    submission = cursor.fetchone()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    file_id = submission.get("file_id")
+    client_id = str(submission.get("client_id"))
+
+    result = {
+        "submission": submission,
+        "file": None,
+        "cleaning_summary": None,
+        "trial_balance_validation": None,
+        "account_mapping": None,
+        "saved_analysis": None,
+    }
+
+    if not file_id:
+        return result
+
+    cursor.execute("SELECT filename, semantic_file_type, file_type FROM uploads WHERE file_id = %s", (file_id,))
+    upload = cursor.fetchone()
+    if not upload:
+        return result
+
+    file_type = upload.get("semantic_file_type") or upload.get("file_type") or "general"
+    result["file"] = {"file_id": file_id, "filename": upload.get("filename"), "file_type": file_type}
+
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        return result
+
+    # Cleaning summary + TB validation are recomputed live from the current cleaned
+    # state, same pattern used everywhere else in this codebase (never trust a stale snapshot)
+    try:
+        cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+        result["cleaning_summary"] = {
+            "total_issues": report.get("total_issues", 0),
+            "can_proceed": report.get("can_proceed", False),
+            "flagged_rows": report.get("flagged_rows", 0),
+            "clean_rows": report.get("clean_rows", 0),
+        }
+        is_ledger = file_type in ("trial_balance", "general_ledger")
+        if is_ledger and report.get("can_proceed"):
+            result["trial_balance_validation"] = validate_trial_balance(cleaned_df, mapping)
+            account_mapping = get_account_mapping(client_id, file_type)
+            if account_mapping:
+                result["account_mapping"] = account_mapping
+    except HTTPException:
+        pass
+
+    analyses = get_saved_analyses_for_file(submission["engagement_id"], file_id)
+    if analyses:
+        result["saved_analysis"] = analyses[0]  # most recent, per existing ORDER BY created_at DESC
+
+    return result
     return submission
 
 # Create a new submission, and notify the relevant users if it has moved past the first workflow stage
@@ -2488,7 +2904,8 @@ def delete_submission(submission_id: int, db=Depends(get_db)):
 def get_user_notifications(user_id: int, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
     cursor.execute("SELECT * FROM notifications WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
-    return cursor.fetchall()
+    notifications = cursor.fetchall()
+    return notifications
 
 # List only the unread notifications for a user, most recent first
 @app.get("/notifications/{user_id}/unread")
@@ -2548,6 +2965,245 @@ def get_all_files(db=Depends(get_db)):
         ORDER BY f.upload_date DESC
     """)
     return cursor.fetchall()
+
+# Save a financial analysis result
+@app.post("/saved-analyses")
+async def save_analysis_endpoint(
+    user_id: int = Form(...),
+    client_id: str = Form(...),
+    engagement_id: int = Form(None),
+    file_id: str = Form(...),
+    file_type: str = Form("general"),
+    analysis_data: str = Form(...),
+    insights_data: str = Form(None)
+):
+    import json
+    analysis_dict = json.loads(analysis_data) if analysis_data else None
+    insights_list = json.loads(insights_data) if insights_data else None
+    
+    analysis_id = save_analysis(user_id, client_id, engagement_id, file_id, file_type, analysis_dict, insights_list)
+    return {"analysis_id": analysis_id, "message": "Analysis saved successfully"}
+
+# Get all saved analyses for a user
+@app.get("/saved-analyses/{user_id}")
+def get_user_saved_analyses(user_id: int):
+    analyses = get_saved_analyses(user_id)
+    return analyses
+
+# Get all saved analyses for an engagement (team-scoped — every snapshot
+# saved by anyone on this engagement, not just the requesting user), most
+# recent first per file, so the frontend can group by file_id and show a
+# history with who saved each one and when.
+@app.get("/engagements/{engagement_id}/saved-analyses")
+def get_engagement_saved_analyses(engagement_id: int):
+    analyses = get_saved_analyses_for_engagement(engagement_id)
+    return analyses
+
+# Get saved analyses for a specific file within an engagement — this is
+# what an auditor needs when working on a particular file. Returns all
+# analysis snapshots for that specific file, with attribution.
+@app.get("/engagements/{engagement_id}/saved-analyses/{file_id}")
+def get_file_saved_analyses(engagement_id: int, file_id: str):
+    analyses = get_saved_analyses_for_file(engagement_id, file_id)
+    return analyses
+
+# Get a specific saved analysis
+@app.get("/saved-analyses/{analysis_id}/view")
+def get_analysis_by_id(analysis_id: int):
+    analysis = get_saved_analysis(analysis_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return analysis
+
+# Delete a saved analysis
+@app.delete("/saved-analyses/{analysis_id}")
+def delete_analysis_endpoint(analysis_id: int):
+    delete_saved_analysis(analysis_id)
+    return {"message": "Analysis deleted successfully"}
+
+# --- Auditor Workspace Pydantic models and API endpoints ---
+
+class WorkspaceOpenRequest(BaseModel):
+    user_id: int
+    engagement_id: Optional[int] = None
+    section_id: Optional[int] = None
+    file_id: Optional[str] = None
+    client_id: Optional[str] = None
+
+class WorkspaceUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    progress_data: Optional[dict] = None
+    file_id: Optional[str] = None
+
+class WorkspaceSubmitRequest(BaseModel):
+    submitted_by: int
+    notes: Optional[str] = None
+
+@app.post("/workspaces/open")
+def open_workspace_endpoint(req: WorkspaceOpenRequest, db=Depends(get_db)):
+    engagement_id = req.engagement_id
+    cursor = db.cursor(dictionary=True)
+    if not engagement_id:
+        if req.file_id:
+            # Resolve engagement through the file's tagged section — reliable,
+            # unlike guessing by client_id alone which breaks with multiple engagements
+            cursor.execute("""
+                SELECT sec.engagement_id FROM uploads u
+                JOIN audit_sections sec ON u.section_id = sec.section_id
+                WHERE u.file_id = %s LIMIT 1
+            """, (req.file_id,))
+            eng = cursor.fetchone()
+            if eng:
+                engagement_id = eng['engagement_id']
+        if not engagement_id and req.client_id:
+            cursor.execute("SELECT engagement_id FROM engagements WHERE CAST(client_id AS CHAR) = %s LIMIT 1", (str(req.client_id),))
+            eng = cursor.fetchone()
+            if eng:
+                engagement_id = eng['engagement_id']
+        if not engagement_id:
+            cursor.execute("SELECT engagement_id FROM engagements ORDER BY created_at DESC LIMIT 1")
+            eng = cursor.fetchone()
+            if eng:
+                engagement_id = eng['engagement_id']
+            else:
+                engagement_id = 1
+
+    # NEW: resolve section_id — prefer the file's own tagged section (set by the
+    # Accountant at upload time) over guessing from auditor assignment
+    section_id = req.section_id
+    cursor = db.cursor(dictionary=True)
+    if not section_id and req.file_id:
+        cursor.execute("SELECT section_id FROM uploads WHERE file_id = %s", (req.file_id,))
+        row = cursor.fetchone()
+        if row and row.get("section_id"):
+            section_id = row["section_id"]
+
+    if not section_id:
+        cursor.execute(
+            "SELECT section_id FROM audit_sections WHERE engagement_id = %s AND assigned_to = %s LIMIT 1",
+            (engagement_id, req.user_id)
+        )
+        sec = cursor.fetchone()
+        if sec:
+            section_id = sec["section_id"]
+
+    ws = get_or_create_workspace(
+        user_id=req.user_id,
+        engagement_id=engagement_id,
+        section_id=section_id,
+        file_id=req.file_id
+    )
+    if not ws:
+        raise HTTPException(status_code=400, detail="Failed to open workspace")
+    return ws
+
+@app.get("/workspaces/{workspace_id}")
+def get_workspace_endpoint(workspace_id: int):
+    ws = get_workspace_by_id(workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return ws
+
+@app.put("/workspaces/{workspace_id}")
+def update_workspace_endpoint(workspace_id: int, req: WorkspaceUpdateRequest):
+    update_workspace_data(
+        workspace_id=workspace_id,
+        status=req.status,
+        notes=req.notes,
+        progress_data=req.progress_data,
+        file_id=req.file_id
+    )
+    ws = get_workspace_by_id(workspace_id)
+    return ws
+
+@app.get("/engagements/{engagement_id}/workspaces")
+def get_engagement_workspaces_endpoint(engagement_id: int):
+    return get_engagement_workspaces(engagement_id)
+
+@app.get("/users/{user_id}/workspaces")
+def get_user_workspaces_endpoint(user_id: int):
+    return get_user_workspaces(user_id)
+
+@app.post("/workspaces/{workspace_id}/submit-for-review")
+def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, db=Depends(get_db)):
+    ws = get_workspace_by_id(workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    section_id = ws.get("section_id")
+    engagement_id = ws.get("engagement_id")
+    cursor = db.cursor(dictionary=True)
+
+    if not section_id and ws.get("file_id"):
+        cursor.execute("SELECT section_id FROM uploads WHERE file_id = %s", (ws["file_id"],))
+        row = cursor.fetchone()
+        if row and row.get("section_id"):
+            section_id = row["section_id"]
+
+    if not section_id:
+        cursor.execute(
+            "SELECT section_id FROM audit_sections WHERE engagement_id = %s AND assigned_to = %s LIMIT 1",
+            (engagement_id, req.submitted_by)
+        )
+        sec = cursor.fetchone()
+        if not sec:
+            raise HTTPException(
+                status_code=400,
+                detail="No audit section is assigned to you for this engagement. Please contact your Audit Manager."
+            )
+        section_id = sec["section_id"]
+        fix_cursor = db.cursor()
+        fix_cursor.execute("UPDATE auditor_workspaces SET section_id = %s WHERE workspace_id = %s", (section_id, workspace_id))
+        db.commit()
+
+    file_id = ws.get("file_id")
+
+    # Reuse the existing submission for this specific FILE (not just section) if one exists
+    cursor.execute(
+        "SELECT * FROM submissions WHERE section_id = %s AND file_id = %s ORDER BY created_at DESC LIMIT 1",
+        (section_id, file_id)
+    )
+    existing = cursor.fetchone()
+
+    write_cursor = db.cursor()
+    if existing:
+        write_cursor.execute(
+            "UPDATE submissions SET status = %s, current_stage = %s, notes = %s, submitted_by = %s WHERE submission_id = %s",
+            ("Submitted", "Accountant", req.notes, req.submitted_by, existing["submission_id"])
+        )
+        submission_id = existing["submission_id"]
+    else:
+        write_cursor.execute(
+            "INSERT INTO submissions (engagement_id, section_id, file_id, submitted_by, status, current_stage, notes) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (engagement_id, section_id, file_id, req.submitted_by, "Submitted", "Accountant", req.notes)
+        )
+        submission_id = write_cursor.lastrowid
+    db.commit()
+
+    # Notify the Accountant-stage reviewers, same pattern as update_submission_status
+    cursor.execute("""
+        SELECT e.engagement_name, sec.section_name FROM engagements e
+        LEFT JOIN audit_sections sec ON sec.engagement_id = e.engagement_id
+        WHERE sec.section_id = %s
+    """, (section_id,))
+    info = cursor.fetchone()
+    if info:
+        message = f"{info['section_name']} for {info['engagement_name']} has been submitted for review"
+        cursor.execute("""
+            SELECT u.user_id FROM users u
+            INNER JOIN engagement_team et ON u.user_id = et.user_id
+            WHERE et.engagement_id = %s AND u.role = 'Accountant'
+        """, (engagement_id,))
+        for row in cursor.fetchall():
+            write_cursor.execute(
+                "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                (row["user_id"], message, "submission_review", engagement_id)
+            )
+        db.commit()
+
+    return {"submission_id": submission_id, "section_id": section_id, "message": "Submitted for review successfully."}
+
 
 # Run the app directly with uvicorn when this file is executed as a script
 if __name__ == "__main__":

@@ -1,19 +1,62 @@
 import { useState, useEffect } from "react";
-import { getNotifications } from "../services/api";
+import { useNavigate } from "react-router-dom";
+import { getNotifications, markNotificationRead, markAllNotificationsRead, openWorkspace } from "../services/api";
 import "../styles/Notifications.css";
 
 // Notifications page: shows the current user's notifications, lets them
 // mark individual notifications as read by clicking them, or mark all
 // as read at once.
 export default function Notifications({ user }) {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]); // list of notifications for this user
   const [loading, setLoading] = useState(true); // true while notifications are being fetched
+
+  const handleOpenNotificationWorkspace = async (n, fileId, clientId) => {
+    handleMarkRead(n);
+    localStorage.setItem('pendingFileId', fileId);
+    localStorage.setItem('pendingClientId', clientId);
+    
+    // First check if file exists
+    try {
+      const previewRes = await getFilePreview(fileId, clientId);
+      const fileData = previewRes.data || previewRes;
+      if (fileData.fileNotFound || (fileData.error && fileData.error.includes("File not found"))) {
+        alert("This file is no longer available. It may have been deleted. Please contact your administrator or upload a new file.");
+        return;
+      }
+    } catch (err) {
+      console.error("Failed to check file existence:", err);
+      alert("Unable to verify file status. Please try again later.");
+      return;
+    }
+    
+    try {
+      const res = await openWorkspace({
+        user_id: user.user_id,
+        file_id: fileId,
+        client_id: String(clientId) // Ensure client_id is a string
+      });
+      const ws = res.data || res;
+      console.log("Workspace response:", ws);
+      if (ws && ws.workspace_id) {
+        navigate(`/workspace/${ws.workspace_id}`);
+        return;
+      } else {
+        console.error("No workspace_id in response:", ws);
+      }
+    } catch (err) {
+      console.error("Workspace open failed, falling back to mapping", err);
+      console.error("Error details:", err.response?.data || err.message);
+    }
+    navigate('/mapping');
+  };
 
   // Fetches the current user's notifications from the API
   const loadData = async () => {
     setLoading(true);
     try {
-      const n = await getNotifications(user.user_id);
+      const response = await getNotifications(user.user_id);
+      const n = response.data || response;
       setNotifications(Array.isArray(n) ? n : []);
     } catch (err) {
       console.error("Failed to load notifications", err);
@@ -27,14 +70,40 @@ export default function Notifications({ user }) {
   // Marks a single notification as read 
   const handleMarkRead = async (notification) => {
     if (notification.is_read) return;
-    await API.markNotificationRead(notification.notification_id);
+    await markNotificationRead(notification.notification_id);
     loadData();
+    // Dispatch event to refresh badge in Layout
+    window.dispatchEvent(new CustomEvent('notification-refresh'));
   };
 
   // Marks all of the user's notifications as read, then reloads the list.
   const handleMarkAllRead = async () => {
-    await API.markAllNotificationsRead(user.user_id);
+    await markAllNotificationsRead(user.user_id);
     loadData();
+    // Dispatch event to refresh badge in Layout
+    window.dispatchEvent(new CustomEvent('notification-refresh'));
+  };
+
+  // Parse file details from notification (use columns if available, fallback to message parsing)
+  const parseNotificationDetails = (notification) => {
+    // First try to use the dedicated columns
+    if (notification.file_id && notification.client_id) {
+      return {
+        baseMessage: notification.message,
+        fileId: notification.file_id,
+        clientId: notification.client_id,
+        engagementId: notification.engagement_id,
+      };
+    }
+    const parts = notification.message.split('|');
+    const baseMessage = parts[0];
+    let fileId = null;
+    let clientId = null;
+    parts.forEach(part => {
+      if (part.startsWith('file_id:')) fileId = part.split(':')[1];
+      if (part.startsWith('client_id:')) clientId = part.split(':')[1];
+    });
+    return { baseMessage, fileId, clientId, engagementId: notification.engagement_id };
   };
 
   // Formats an ISO date string into "12 Jan 2025 · 14:30" style output
@@ -59,8 +128,8 @@ export default function Notifications({ user }) {
           <h1>Notifications</h1>
           <p>
             {unreadCount > 0
-              ? `You have ${unreadCount} unread notification${unreadCount > 1 ? "s" : ""}`
-              : "You're all caught up"}
+              ? `${unreadCount} new notification${unreadCount > 1 ? "s" : ""} waiting for you`
+              : "You're all caught up — no new notifications"}
           </p>
         </div>
         {unreadCount > 0 && (
@@ -77,11 +146,14 @@ export default function Notifications({ user }) {
         ) : notifications.length === 0 ? (
           <p className="notif-empty">No notifications yet.</p>
         ) : (
-          notifications.map((n) => (
-            // Clicking any notification marks it as read
+          notifications.map((n) => {
+            const { baseMessage, fileId, clientId, engagementId } = parseNotificationDetails(n);
+            const isFileSubmission = n.type === 'file_submission' && fileId;
+            const isSubmissionReview = n.type === 'submission_review' && engagementId;
+
+            return (
             <div
               key={n.notification_id}
-              onClick={() => handleMarkRead(n)}
               className={`notif-item ${n.is_read ? "notif-item--read" : "notif-item--unread"}`}
             >
               {/* Status dot: filled for unread, muted for read */}
@@ -89,15 +161,48 @@ export default function Notifications({ user }) {
 
               <div className="notif-body">
                 <p className={`notif-message ${n.is_read ? "notif-message--read" : "notif-message--unread"}`}>
-                  {n.message}
+                  {baseMessage}
                 </p>
                 <span className="notif-timestamp">{formatDate(n.created_at)}</span>
+
+                {/* Action buttons for file submissions */}
+                {isFileSubmission && (
+                  <div className="notif-actions">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenNotificationWorkspace(n, fileId, clientId);
+                      }}
+                      className="notif-btn-proceed"
+                    >
+                      Open Workspace
+                    </button>
+                  </div>
+                )}
+
+                {isSubmissionReview && (
+                  <div className="notif-actions">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkRead(n);
+                        // Navigate to the latest submission for this engagement's section
+                        // For now, navigate to engagement detail - user can click on submission from there
+                        navigate(`/engagements/${engagementId}`);
+                      }}
+                      className="notif-btn-proceed"
+                    >
+                      Review Submission
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* "New" badge only shown for unread notifications */}
               {!n.is_read && <span className="notif-badge-new">New</span>}
             </div>
-          ))
+          );
+          })
         )}
       </div>
     </div>

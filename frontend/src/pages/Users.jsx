@@ -138,6 +138,9 @@ export default function Users({ user }) {
           ? Number(form.assigned_client_id)
           : null;
 
+        // Convert empty phone string to null
+        payload.phone = payload.phone || null;
+
         const res = await updateUser(
           editingUser.user_id,
           payload
@@ -155,6 +158,9 @@ export default function Users({ user }) {
           ? Number(form.assigned_client_id)
           : null;
 
+        // Convert empty phone string to null
+        payload.phone = payload.phone || null;
+
         const res = await createUser(payload);
 
         if (res.data?.detail) {
@@ -167,9 +173,8 @@ export default function Users({ user }) {
       setShowModal(false);
       loadData(); // refresh table with the new/updated user
     } catch (err) {
-      setError(
-        "Could not save user. Check your connection."
-      );
+      const errorMsg = err.response?.data?.detail || err.message || "Could not save user. Check your connection.";
+      setError(errorMsg);
     }
 
     setSaving(false);

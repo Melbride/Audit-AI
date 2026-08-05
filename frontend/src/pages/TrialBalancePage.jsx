@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { completeWorkflowStep } from '../services/api'
 import '../styles/CleanPage.css'
 // import '../styles/AnalysisPage.css'
 import '../styles/CleanPage.css'
@@ -143,9 +144,22 @@ function TrialBalancePage() {
                                 <button
                                     className="btn btn-proceed"
                                     disabled={result.high_issues > 0}
-                                    onClick={() => navigate('/account-mapping', {
-                                        state: { cleanResult, clientId, uploadResult, fileType }
-                                    })}
+                                    onClick={async () => {
+                                        try {
+                                            const formData = new FormData()
+                                            formData.append('file_id', fileId)
+                                            formData.append('client_id', clientId)
+                                            formData.append('file_type', fileType || 'general')
+                                            formData.append('step', 'tb_validation')
+                                            formData.append('next_stage', 'account_mapping')
+                                            await completeWorkflowStep(formData)
+                                        } catch (err) {
+                                            console.error('Failed to mark workflow step complete:', err)
+                                        }
+                                        navigate('/account-mapping', {
+                                            state: { cleanResult, clientId, uploadResult, fileType }
+                                        })
+                                    }}
                                 >
                                     Proceed to Account Mapping →
                                 </button>

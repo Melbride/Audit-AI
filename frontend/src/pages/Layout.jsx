@@ -1,4 +1,6 @@
-﻿import { useLocation, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { getUnreadNotifications } from '../services/api'
 import '../styles/Layout.css'
 
 // Static list of sidebar navigation items.
@@ -95,15 +97,26 @@ const NAV_ITEMS = [
     ),
   },
   {
-  key: "analysis",
-  path: "/analysis",      // â† add this line
-  label: "Analysis",       // (also capitalized to match the others, optional)
-  icon: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 3v18h18M7 16l4-4 4 4 4-6" />
-    </svg>
-  ),
-},
+    key: "analysis",
+    path: "/analysis/history",
+    label: "Analysis",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M3 3v18h18M7 16l4-4 4 4-6" />
+      </svg>
+    ),
+  },
+  {
+    key: "my-workspaces",
+    path: "/my-workspaces",
+    label: "My Workspaces",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="4" width="18" height="14" rx="2" />
+        <path d="M3 9h18M8 4v5" />
+      </svg>
+    ),
+  },
 ];
 
 
@@ -112,6 +125,52 @@ const NAV_ITEMS = [
 export default function Layout({ user, onLogout, children }) {
   const location = useLocation()
   const navigate = useNavigate()
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  // Filter navigation items based on user role
+  // Accountants see Upload, Auditors see Mapping/Cleaning/Analysis
+  const getRoleBasedNavItems = () => {
+    const isAccountant = user?.role === "Accountant"
+    const isAuditor = ["Auditor", "Senior Auditor", "Assistant Manager", "Audit Manager", "Engagement Partner", "Quality Reviewer"].includes(user?.role)
+    
+    return NAV_ITEMS.filter(item => {
+      // Upload is only for Accountants
+      if (item.key === "upload") return isAccountant
+      // Analysis is only for Auditors
+      if (item.key === "analysis") return isAuditor
+      // My Workspaces is only for Auditors
+      if (item.key === "my-workspaces") return isAuditor
+      // All other items (Dashboard, Clients, Engagements, Submissions, Reports, Users, Notifications) are available to all
+      return true
+    })
+  }
+
+  // Fetch unread notification count
+  const fetchUnreadCount = () => {
+    if (user?.user_id) {
+      getUnreadNotifications(user.user_id)
+        .then(res => {
+          const count = res.data?.length || res.length || 0
+          setUnreadCount(count)
+        })
+        .catch(err => console.error('Failed to fetch unread count:', err))
+    }
+  }
+
+  useEffect(() => {
+    fetchUnreadCount()
+    // Poll every 30 seconds to keep badge updated
+    const interval = setInterval(fetchUnreadCount, 30000)
+    
+    // Listen for custom refresh event from Notifications page
+    const handleRefresh = () => fetchUnreadCount()
+    window.addEventListener('notification-refresh', handleRefresh)
+    
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('notification-refresh', handleRefresh)
+    }
+  }, [user?.user_id, location.pathname]) // Refresh on route change
 
   const adminNavItems = user?.role === "Admin" ? [
     {
@@ -139,10 +198,17 @@ export default function Layout({ user, onLogout, children }) {
     if (item.key === "engagements") {
       return location.pathname.startsWith("/engagements")
     }
-    // Highlight "Upload & Clean" for all pipeline pages
+    // Highlight "Upload & Clean" for pipeline pages (excluding analysis)
     if (item.key === "upload") {
-      return ["/upload", "/mapping", "/clean", "/analysis", "/corrected-results"]
+      return ["/upload", "/mapping", "/clean", "/corrected-results"]
         .includes(location.pathname)
+    }
+    // Highlight Analysis for analysis pages
+    if (item.key === "analysis") {
+      return location.pathname.startsWith("/analysis")
+    }
+    if (item.key === "my-workspaces") {
+      return location.pathname === "/my-workspaces"
     }
     if (item.key === "login-management") {
       return location.pathname.startsWith("/login-management")
@@ -171,9 +237,9 @@ export default function Layout({ user, onLogout, children }) {
           <span className="layout-logo-text">Audit AI</span>
         </div>
 
-        {/* Nav links â€” clicking navigates via react-router, active item is highlighted */}
+        {/* Nav links — clicking navigates via react-router, active item is highlighted */}
         <nav className="layout-nav">
-          {[...NAV_ITEMS, ...adminNavItems].map(item => (
+          {[...getRoleBasedNavItems(), ...adminNavItems].map(item => (
             <div
               key={item.key}
               onClick={() => navigate(item.path)}
@@ -181,25 +247,29 @@ export default function Layout({ user, onLogout, children }) {
             >
               {item.icon}
               {item.label}
+              {item.key === 'notifications' && unreadCount > 0 && (
+                <span className="notification-badge">{unreadCount}</span>
+              )}
             </div>
           ))}
         </nav>
 
-        {/* User info + logout â€” name/role/email are optional (rendered only if present) */}
+        {/* User info + logout — name/role/email are optional */}
         <div className="layout-user">
-          <div className="layout-user-name">{user?.full_name}</div>
-          {user?.role  && <div className="layout-user-role">{user.role}</div>}
-          {user?.email && <div className="layout-user-email">{user.email}</div>}
-          <button className="layout-logout-btn" onClick={onLogout}>Log Out</button>
+          <div className="layout-user-info">
+            <div className="layout-user-name">{user?.full_name || "User"}</div>
+            <div className="layout-user-role">{user?.role || "Role"}</div>
+          </div>
+          <button onClick={onLogout} className="layout-logout">
+            Sign Out
+          </button>
         </div>
-
       </aside>
 
-      {/* Page content â€” whatever page component is currently routed */}
+      {/* Main content area */}
       <main className="layout-main">
         {children}
       </main>
-
     </div>
-  );
+  )
 }

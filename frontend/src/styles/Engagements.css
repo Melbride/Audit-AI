@@ -78,6 +78,13 @@
 }
 
 .eng-picker-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.eng-picker-field {
+  flex: 1;
   display: grid;
   gap: 8px;
 }

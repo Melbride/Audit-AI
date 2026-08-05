@@ -15,25 +15,28 @@
 /* Back Button */
 
 .back-button {
-  background: none;
-  border: none;
-  padding: 0;
-  margin-bottom: 16px;
-  color: var(--accent); /* Sky Blue for actions */
+  background-color: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 16px;
+  margin-bottom: 12px;
+  color: #475569;
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  transition: color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .back-button:hover {
-  color: var(--accent-hover);
-  text-decoration: underline;
+  background-color: #e2e8f0;
+  border-color: #94a3b8;
+  color: #1e293b;
 }
 
 /* Header */
 
 .engagement-header {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .engagement-header h1 {
@@ -79,10 +82,10 @@
 /* Table Container */
 
 .sections-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -100,7 +103,7 @@
 .sections-table th {
   background: var(--surface-hover);
   text-align: left;
-  padding: 14px 20px;
+  padding: 10px 16px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
@@ -110,7 +113,6 @@
 
 .sections-table tbody tr {
   background: var(--surface) !important;
-  transition: background var(--transition);
 }
 
 /* Force standard system row backgrounds to prevent light bleed variables */
@@ -119,12 +121,8 @@
   background: var(--surface) !important;
 }
 
-.sections-table tbody tr:hover {
-  background: var(--surface-hover) !important;
-}
-
 .sections-table td {
-  padding: 14px 20px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
   color: var(--text-soft);
@@ -344,4 +342,71 @@
   .action-btn {
     width: 100%;
   }
+}
+
+/* File Analysis History Section */
+.file-history-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow);
+}
+
+.file-history-header {
+  margin-bottom: 16px;
+}
+
+.file-history-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+
+.file-history-header p {
+  font-size: 13px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.file-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-selector label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.file-selector select {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 400px;
+}
+
+.file-selector select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.file-history-content {
+  background: var(--background);
+  border-radius: 8px;
+  padding: 16px;
+  min-height: 100px;
 }

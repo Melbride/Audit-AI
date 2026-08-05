@@ -130,6 +130,27 @@ def detect_anomalies(monthly_trend: dict, threshold: float = 1.5) -> list:
     return anomalies
 
 
+def _parse_insights_response(raw: str) -> list:
+    """
+    Shared JSON parsing/cleanup for both insight-generation functions below.
+    Also normalizes 'why' and 'recommendation' so every insight object has
+    both keys (defaulting to None) even if the LLM omits them, so the
+    frontend never has to guess whether a key is missing vs. empty.
+    """
+    raw = raw.strip().replace("```json", "").replace("```", "").strip()
+    try:
+        insights = json.loads(raw)
+        if not isinstance(insights, list):
+            return []
+    except json.JSONDecodeError:
+        return []
+
+    for insight in insights:
+        if isinstance(insight, dict):
+            insight.setdefault("why", None)
+            insight.setdefault("recommendation", None)
+    return insights
+
 
 def generate_ai_insights(breakdowns: dict, monthly_trend: dict, anomalies: list) -> list:
     """
@@ -162,13 +183,20 @@ Instructions:
 - Use plain business language, not technical jargon
 - Each insight needs a "type" (anomaly, trend, or variance), a "severity" 
   (high, medium, or info) and a "message" (one clear sentence)
+- Each insight may also include a "why": one short sentence on the likely
+  cause, based only on the numbers already given, never invented
+- Each insight may also include a "recommendation": one short sentence
+  naming a concrete action the auditor could take. Only include this when
+  there's a genuinely useful action — for purely informational insights
+  (e.g. noting which category is largest), omit "recommendation" entirely
+  or set it to null rather than inventing a generic action
 - Base every insight ONLY on the numbers provided above, do not invent figures
 - Return ONLY a valid JSON array, no text before or after, no markdown
 
 Example output format:
 [
-  {{"type": "anomaly", "severity": "medium", "message": "Hardware expenses in February were unusually high compared to other months"}},
-  {{"type": "trend", "severity": "info", "message": "IT remains the largest expense category, accounting for the majority of total spend"}}
+  {{"type": "anomaly", "severity": "medium", "message": "Hardware expenses in February were unusually high compared to other months", "why": "February's hardware spend is well above the typical monthly range seen in the rest of the data", "recommendation": "Ask the client for supporting documentation on February's hardware purchases to confirm they're legitimate and correctly recorded"}},
+  {{"type": "trend", "severity": "info", "message": "IT remains the largest expense category, accounting for the majority of total spend", "why": null, "recommendation": null}}
 ]"""
 
     response = client.chat.completions.create(
@@ -184,18 +212,10 @@ Example output format:
             }
         ],
         temperature=0.3,
-        max_tokens=1000,
+        max_tokens=1200,
     )
-    raw = response.choices[0].message.content.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-
-    try:
-        insights = json.loads(raw)
-        if not isinstance(insights, list):
-            return []
-        return insights
-    except json.JSONDecodeError:
-        return []
+    raw = response.choices[0].message.content
+    return _parse_insights_response(raw)
 
 
 def generate_financial_ai_insights(
@@ -242,12 +262,21 @@ Instructions:
 - Mention year-over-year or period movement only when comparative analytics is available
 - Do not invent prior-year movement, monthly movement, or drivers that are not in the data
 - Each insight needs a "type" (profitability, liquidity, solvency, margin, expense_mix, revenue_mix, comparative, or statement_check), a "severity" (high, medium, or info), and a "message" (one clear sentence)
+- Each insight may also include a "why": one short sentence on the likely
+  cause, grounded only in the statements/ratios/analytics already given,
+  never invented or assumed beyond the data
+- Each insight may also include a "recommendation": one short sentence
+  naming a concrete, accounting-appropriate action the auditor or client
+  could take (e.g. what to review, negotiate, or investigate). Only include
+  this when there's a genuinely useful action — for purely informational or
+  neutral insights, omit "recommendation" entirely or set it to null rather
+  than inventing a generic action
 - Return ONLY a valid JSON array, no text before or after, no markdown
 
 Example output format:
 [
-  {{"type": "margin", "severity": "medium", "message": "Gross margin is 48.6%, with cost of sales consuming 51.4% of revenue."}},
-  {{"type": "solvency", "severity": "info", "message": "Debt to equity is 1.06, indicating liabilities are slightly higher than equity."}}
+  {{"type": "margin", "severity": "medium", "message": "Gross margin is 48.6%, with cost of sales consuming 51.4% of revenue.", "why": "Cost of sales is taking up more than half of revenue, leaving a thinner gross margin than a business would typically want.", "recommendation": "Review supplier pricing and recent cost of sales trends to see whether input costs have risen or pricing needs adjusting."}},
+  {{"type": "solvency", "severity": "info", "message": "Debt to equity is 1.06, indicating liabilities are slightly higher than equity.", "why": null, "recommendation": null}}
 ]"""
 
     response = client.chat.completions.create(
@@ -263,18 +292,10 @@ Example output format:
             }
         ],
         temperature=0.25,
-        max_tokens=1200,
+        max_tokens=1500,
     )
-    raw = response.choices[0].message.content.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-
-    try:
-        insights = json.loads(raw)
-        if not isinstance(insights, list):
-            return []
-        return insights
-    except json.JSONDecodeError:
-        return []
+    raw = response.choices[0].message.content
+    return _parse_insights_response(raw)
 
 
 # Determine analysis scope
@@ -294,7 +315,3 @@ def determine_analysis_scope(breakdowns: dict, monthly_trend: dict) -> str:
         return "partial"
     else:
         return "undetermined"
-
-
-
-

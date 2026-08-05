@@ -164,37 +164,39 @@ export default function Engagements({ user }) {
         ) : (
           <div className="eng-client-picker">
             <div className="eng-picker-row">
-              <label className="eng-label" htmlFor="engagement-search">
-                Search engagements
-              </label>
-              <input
-                id="engagement-search"
-                className="eng-input"
-                placeholder="Search by name, client, year, or status"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="eng-picker-row">
-              <label className="eng-label" htmlFor="engagement-select">
-                Choose an engagement
-              </label>
-              <select
-                id="engagement-select"
-                className="eng-select"
-                value={selectedEngagement?.engagement_id || ""}
-                onChange={(e) => {
-                  const engagement = engagements.find((item) => String(item.engagement_id) === e.target.value);
-                  setSelectedEngagement(engagement || null);
-                }}
-              >
-                <option value="">Choose an engagement...</option>
-                {filteredEngagements.map((e) => (
-                  <option key={e.engagement_id} value={e.engagement_id}>
-                    {e.engagement_name} — {e.company_name} ({e.financial_year})
-                  </option>
-                ))}
-              </select>
+              <div className="eng-picker-field">
+                <label className="eng-label" htmlFor="engagement-search">
+                  Search engagements
+                </label>
+                <input
+                  id="engagement-search"
+                  className="eng-input"
+                  placeholder="Search by name, client, year, or status"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="eng-picker-field">
+                <label className="eng-label" htmlFor="engagement-select">
+                  Choose an engagement
+                </label>
+                <select
+                  id="engagement-select"
+                  className="eng-select"
+                  value={selectedEngagement?.engagement_id || ""}
+                  onChange={(e) => {
+                    const engagement = engagements.find((item) => String(item.engagement_id) === e.target.value);
+                    setSelectedEngagement(engagement || null);
+                  }}
+                >
+                  <option value="">Choose an engagement...</option>
+                  {filteredEngagements.map((e) => (
+                    <option key={e.engagement_id} value={e.engagement_id}>
+                      {e.engagement_name} — {e.company_name} ({e.financial_year})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {filteredEngagements.length === 0 && (
@@ -237,11 +239,7 @@ export default function Engagements({ user }) {
                   </button>
                 </div>
               </div>
-            ) : (
-              filteredEngagements.length > 0 && (
-                <p className="eng-empty">Select an engagement to view its details.</p>
-              )
-            )}
+            ) : null}
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { completeWorkflowStep } from '../services/api'
 import '../styles/CleanPage.css'
 // import '../styles/AnalysisPage.css'
 
@@ -255,9 +256,23 @@ function FinancialStatementsPage() {
                     <div className="card">
                         <button
                             className="btn btn-proceed"
-                            onClick={() => navigate('/analysis', {
-                                state: { cleanResult, clientId, uploadResult, fileType }
-                            })}
+                            onClick={async () => {
+                                try {
+                                    const formData = new FormData()
+                                    formData.append('file_id', cleanResult.file_id)
+                                    formData.append('client_id', clientId)
+                                    formData.append('file_type', fileType || 'general')
+                                    formData.append('step', 'financial_analysis')
+                                    formData.append('next_stage', 'analysis')
+                                    await completeWorkflowStep(formData)
+                                    console.log('Workflow step completed successfully')
+                                } catch (err) {
+                                    console.error('Failed to mark workflow step complete:', err)
+                                }
+                                navigate('/analysis', {
+                                    state: { cleanResult, clientId, uploadResult, fileType }
+                                })
+                            }}
                         >
                             Proceed to Financial Analytics →
                         </button>

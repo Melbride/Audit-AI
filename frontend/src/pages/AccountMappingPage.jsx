@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { completeWorkflowStep } from '../services/api'
 import '../styles/CleanPage.css'
 import '../styles/MappingPage.css'
 
@@ -227,9 +228,23 @@ function AccountMappingPage() {
                             <div className="success">Account mapping saved successfully!</div>
                             <button
                                 className="btn btn-secondary"
-                                onClick={() => navigate('/financial-statements', {
-                                    state: { cleanResult, clientId, uploadResult, fileType }
-                                })}
+                                onClick={async () => {
+                                    try {
+                                        const formData = new FormData()
+                                        formData.append('file_id', cleanResult.file_id)
+                                        formData.append('client_id', clientId)
+                                        formData.append('file_type', fileType || 'general')
+                                        formData.append('step', 'account_mapping')
+                                        formData.append('next_stage', 'financial_analysis')
+                                        await completeWorkflowStep(formData)
+                                        console.log('Workflow step completed successfully')
+                                    } catch (err) {
+                                        console.error('Failed to mark workflow step complete:', err)
+                                    }
+                                    navigate('/financial-statements', {
+                                        state: { cleanResult, clientId, uploadResult, fileType }
+                                    })
+                                }}
                             >
                                 Proceed to Financial Statements →
                             </button>

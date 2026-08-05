@@ -80,11 +80,12 @@ export default function Dashboard({ user }) {
         </svg>
       ),
     },
-    {
-      label: "Files Uploaded",
+    // Role-specific cards
+    ...(user?.role === "Accountant" ? [{
+      label: "Upload Files",
       value: files.length,
       variant: "green",
-      path: "/files",
+      path: "/upload",
       icon: (
         <svg
           width="22"
@@ -94,10 +95,31 @@ export default function Dashboard({ user }) {
           stroke="currentColor"
           strokeWidth="2"
         >
-          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
       ),
-    },
+    }] : []),
+    ...(["Auditor", "Senior Auditor", "Assistant Manager", "Audit Manager", "Engagement Partner", "Quality Reviewer"].includes(user?.role) ? [{
+      label: "Submissions",
+      value: engagements.length,
+      variant: "purple",
+      path: "/submissions",
+      icon: (
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <rect x="6" y="4" width="12" height="16" rx="2" />
+          <path d="M9 4V2h6v2M9 11l2 2 4-4" />
+        </svg>
+      ),
+    }] : []),
   ];
 
   // Show a simple loading message until all summary data has been fetched

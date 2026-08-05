@@ -1,14 +1,31 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { detectColumns, saveMapping } from '../services/api'
+import { detectColumns, saveMapping, getFilePreview } from '../services/api'
 import '../styles/MappingPage.css'
 
 function MappingPage() {
+    
     const location = useLocation()
     const navigate = useNavigate()
 
-    const { uploadResult, clientId } = location.state || {}
+    // Read from localStorage first, fallback to location.state
+    const fileId = localStorage.getItem('pendingFileId') || location.state?.fileId
+    const clientId = localStorage.getItem('pendingClientId') || location.state?.clientId
+    const { uploadResult } = location.state || {}
+    
+    
+    
+    
+    
+    
+    // Debug logging
+    
+    
+    
+    
     const [mapping, setMapping] = useState(null)
+    const [loadingFile, setLoadingFile] = useState(false)
+    const [loadedUploadResult, setLoadedUploadResult] = useState(null)
     const [detecting, setDetecting] = useState(false)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
@@ -27,6 +44,7 @@ function MappingPage() {
         bank_transactions: 'Bank Transactions',
         payroll: 'Payroll',
         general_ledger: 'General Ledger',
+        trial_balance: 'Trial Balance',
         accounts_receivable: 'Accounts Receivable',
         accounts_payable: 'Accounts Payable',
         inventory: 'Inventory',
@@ -56,6 +74,101 @@ function MappingPage() {
         if (uploadResult) handleDetect()
     }, [])
 
+    // Don't clear localStorage for debugging
+    // useEffect(() => {
+    //     if (fileId && loadedUploadResult) {
+    //         localStorage.removeItem('pendingFileId')
+    //         localStorage.removeItem('pendingClientId')
+    //     }
+    // }, [fileId, loadedUploadResult])
+
+    // Load file data if coming from notification (fileId provided but no uploadResult)
+    useEffect(() => {
+        
+        if (fileId && clientId && !uploadResult) {
+            
+            setLoadingFile(true)
+            const loadFileAndDetect = async () => {
+                try {
+                    
+                    const response = await getFilePreview(fileId, clientId)
+                    const data = response.data || response
+                    
+                    // Create uploadResult-like object
+                    const loadedUploadResult = {
+                        file_id: fileId,
+                        filename: data.filename,
+                        rows: data.rows,
+                        columns: data.columns,
+                        preview: data.preview,
+                        file_type: data.file_type || 'other'
+                    }
+                    // Set uploadResult state so the page can display file info
+                    setLoadedUploadResult(loadedUploadResult)
+                    
+                    // Manually trigger detection with loaded data
+                    const formData = new FormData()
+                    formData.append('client_id', String(clientId))
+                    formData.append('file_id', fileId)
+                    formData.append('columns', JSON.stringify(data.columns))
+                    formData.append('fill_rates', JSON.stringify({}))
+                    formData.append('fingerprint', '')
+                    // Don't pass file_type initially - let backend return the saved one
+                    formData.append('file_type', 'general')
+                    const detectResponse = await detectColumns(formData)
+                    
+                    setMapping(detectResponse.data.mapping)
+                    setDetectionSource(detectResponse.data.source || null)
+                    setDetectionMessage(detectResponse.data.message || null)
+                } catch (err) {
+                    
+                    setError('Failed to load file or detect columns: ' + (err.message || err))
+                } finally {
+                    setLoadingFile(false)
+                }
+            }
+            loadFileAndDetect()
+        }
+    }, [fileId, clientId, uploadResult, fileType])
+
+    // Load file data if coming from notification (fileId provided but no uploadResult)
+    useEffect(() => {
+        if (fileId && clientId && !uploadResult) {
+            setLoadingFile(true)
+            const loadFileAndDetect = async () => {
+                try {
+                    const response = await getFilePreview(fileId, clientId)
+                    const data = response.data || response
+                    const loadedUploadResult = {
+                        file_id: fileId,
+                        filename: data.filename,
+                        rows: data.rows,
+                        columns: data.columns,
+                        preview: data.preview,
+                        file_type: data.file_type || 'other'
+                    }
+                    setLoadedUploadResult(loadedUploadResult)
+                    const formData = new FormData()
+                    formData.append('client_id', String(clientId))
+                    formData.append('file_id', fileId)
+                    formData.append('columns', JSON.stringify(data.columns))
+                    formData.append('fill_rates', JSON.stringify({}))
+                    formData.append('fingerprint', '')
+                    formData.append('file_type', 'general')
+                    const detectResponse = await detectColumns(formData)
+                    setMapping(detectResponse.data.mapping)
+                    setDetectionSource(detectResponse.data.source || null)
+                    setDetectionMessage(detectResponse.data.message || null)
+                } catch (err) {
+                    setError('Failed to load file or detect columns')
+                } finally {
+                    setLoadingFile(false)
+                }
+            }
+            loadFileAndDetect()
+        }
+    }, [fileId, clientId, uploadResult, fileType])
+
     // Calls backend to detect/suggest column mappings for the uploaded file
     const handleDetect = async () => {
         setDetecting(true)
@@ -63,7 +176,7 @@ function MappingPage() {
         try {
             const formData = new FormData()
             formData.append('client_id', String(clientId))
-            formData.append('file_id', uploadResult.file_id)
+            formData.append('file_id', (uploadResult || loadedUploadResult).file_id)
             formData.append('columns', JSON.stringify(uploadResult.columns))
             formData.append('fill_rates', JSON.stringify(uploadResult.fill_rates || {}))
             formData.append('fingerprint', uploadResult.fingerprint || '')
@@ -154,10 +267,11 @@ function MappingPage() {
         try {
             const formData = new FormData()
             formData.append('client_id', clientId)
-            formData.append('file_id', uploadResult.file_id)   
+            formData.append('file_id', (uploadResult || loadedUploadResult).file_id)   
             formData.append('file_type', effectiveFileType())
             formData.append('mapping', JSON.stringify(persistedMapping))
             formData.append('confirmed_by', 'Auditor')
+            formData.append('fingerprint', (uploadResult || loadedUploadResult).fingerprint || '')
 
             await saveMapping(formData)
             setMapping(persistedMapping)
@@ -171,7 +285,7 @@ function MappingPage() {
 
     const handleProceed = () => {
         navigate('/clean', {
-            state: { uploadResult, clientId, fileType: effectiveFileType(), mapping: buildPersistedMapping() }
+            state: { uploadResult: uploadResult || loadedUploadResult, clientId, fileType: effectiveFileType(), mapping: buildPersistedMapping() }
         })
     }
 
@@ -206,7 +320,7 @@ function MappingPage() {
         return null
     }
 
-    if (!uploadResult) {
+    if (!uploadResult && !fileId) {
         return (
             <div className="page">
                 <p className="error">No file uploaded. Please go back and upload a file first.</p>
@@ -217,6 +331,7 @@ function MappingPage() {
 
     return (
         <div className="page">
+
             {/* <div className="header">
                 <h1 className="logo">Audit AI</h1>
                 <p className="subtitle">AI Financial Intelligence System</p>
@@ -224,14 +339,32 @@ function MappingPage() {
 
             <div className="card">
                 <h2 className="title">Column Detection</h2>
-                <div className="info-row">
-                    <span className="info-label">File:</span>
-                    <span>{uploadResult.filename}</span>
-                </div>
-                <div className="info-row">
-                    <span className="info-label">Client:</span>
-                    <span>{clientId}</span>
-                </div>
+                {loadingFile ? (
+                    <p>Loading file data...</p>
+                ) : (
+                    <>
+                        <div className="info-row">
+                            <span className="info-label">File:</span>
+                            <span>{(uploadResult || loadedUploadResult)?.filename || 'No file'}</span>
+                        </div>
+                        <div className="info-row">
+                            <span className="info-label">Client:</span>
+                            <span>{clientId}</span>
+                        </div>
+                        {loadedUploadResult && (
+                            <>
+                                <div className="info-row">
+                                    <span className="info-label">Rows:</span>
+                                    <span>{loadedUploadResult.rows}</span>
+                                </div>
+                                <div className="info-row">
+                                    <span className="info-label">Columns:</span>
+                                    <span>{loadedUploadResult.columns?.join(', ') || 'None'}</span>
+                                </div>
+                            </>
+                        )}
+                    </>
+                )}
             </div>
 
             {detecting && (
