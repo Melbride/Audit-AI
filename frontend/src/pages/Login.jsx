@@ -1,7 +1,6 @@
 ﻿import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { login, requestPasswordReset, confirmPasswordReset } from "../services/api";
-
+import { login, requestPasswordReset } from "../services/api";
 const colors = {
   primary: "#2563EB",
   secondary: "#2563EB",
@@ -21,9 +20,8 @@ export default function Login({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [resetEmail, setResetEmail] = useState("");
-  const [resetToken, setResetToken] = useState("");
-  const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -53,27 +51,10 @@ export default function Login({ onLogin }) {
     setLoading(true);
     setError("");
     try {
-      const res = await requestPasswordReset(resetEmail);
-      setMessage(res.data.message || "Reset link sent. Check your email.");
-    } catch (err) {
-      setError(err.response?.data?.detail || "Could not connect to server.");
-    }
-    setLoading(false);
-  };
-
-  const handleReset = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-    try {
-      const res = await confirmPasswordReset(resetToken, newPassword);
-      const data = res.data;
-      if (data.message) {
-        setMessage("Password reset successful! You can now log in.");
-        setView("login");
-      } else {
-        setError(data.detail || "Reset failed. Token may have expired.");
-      }
+      await requestPasswordReset(resetEmail);
+      setShowSuccessModal(true);
+      setMessage("");
+      setError("");
     } catch (err) {
       setError(err.response?.data?.detail || "Could not connect to server.");
     }
@@ -123,9 +104,6 @@ export default function Login({ onLogin }) {
         {error && (
           <div style={{ background: "#fdecea", border: `1px solid ${colors.danger}`, color: colors.danger, padding: "12px 16px", borderRadius: "8px", fontSize: "13px", marginBottom: "20px" }}>{error}</div>
         )}
-        {message && (
-          <div style={{ background: "#eafaf1", border: `1px solid ${colors.success}`, color: colors.success, padding: "12px 16px", borderRadius: "8px", fontSize: "13px", marginBottom: "20px" }}>{message}</div>
-        )}
 
         {view === "login" && (
           <>
@@ -151,44 +129,96 @@ export default function Login({ onLogin }) {
         {view === "forgot" && (
           <>
             <h3 style={{ fontSize: "24px", fontWeight: "700", color: colors.primary, marginBottom: "8px", textAlign: "center" }}>Reset your password</h3>
-            <p style={{ fontSize: "14px", color: "#64748B", marginBottom: "32px", textAlign: "center" }}>Enter your email to receive a reset token</p>
+            <p style={{ fontSize: "14px", color: "#64748B", marginBottom: "32px", textAlign: "center" }}>Enter your email address and we'll send you a link to reset your password.</p>
             <form onSubmit={handleForgot}>
               <div style={{ marginBottom: "24px" }}>
                 <label style={labelStyle}>Email Address</label>
                 <input type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="you@auditai.com" required style={inputStyle} />
               </div>
-              <button type="submit" disabled={loading} style={btnStyle}>{loading ? "Sending..." : "Send Reset Token"}</button>
+              <button type="submit" disabled={loading} style={btnStyle}>{loading ? "Sending..." : "Send Reset Link"}</button>
               <div style={{ textAlign: "center" }}>
                 <span onClick={() => { setView("login"); setError(""); }} style={{ fontSize: "13px", color: colors.accent, cursor: "pointer" }}>Back to login</span>
               </div>
             </form>
           </>
         )}
-
-        {view === "reset" && (
-          <>
-            <h3 style={{ fontSize: "24px", fontWeight: "700", color: colors.primary, marginBottom: "8px", textAlign: "center" }}>Set new password</h3>
-            <p style={{ fontSize: "14px", color: "#64748B", marginBottom: "32px", textAlign: "center" }}>Enter your reset token and new password</p>
-            <form onSubmit={handleReset}>
-              <div style={{ marginBottom: "20px" }}>
-                <label style={labelStyle}>Reset Token</label>
-                <input type="text" value={resetToken} onChange={(e) => setResetToken(e.target.value)} placeholder="Paste your reset token" required style={inputStyle} />
-              </div>
-              <div style={{ marginBottom: "24px" }}>
-                <label style={labelStyle}>New Password</label>
-                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Enter new password" required style={inputStyle} />
-              </div>
-              <button type="submit" disabled={loading} style={btnStyle}>{loading ? "Resetting..." : "Reset Password"}</button>
-              <div style={{ textAlign: "center" }}>
-                <span onClick={() => { setView("login"); setError(""); setMessage(""); }} style={{ fontSize: "13px", color: colors.accent, cursor: "pointer" }}>Back to login</span>
-              </div>
-            </form>
-          </>
-        )}
       </div>
+
+      {showSuccessModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "24px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "420px",
+              maxWidth: "100%",
+              borderRadius: "16px",
+              padding: "36px",
+              textAlign: "center",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                width: "70px",
+                height: "70px",
+                margin: "0 auto 20px",
+                borderRadius: "50%",
+                background: "#ECFDF5",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "34px",
+                color: colors.success,
+              }}
+            >
+              ✓
+            </div>
+
+            <h2 style={{ color: colors.primary, marginBottom: "12px" }}>
+              Password Reset Link Sent
+            </h2>
+
+            <p style={{ color: "#64748B", fontSize: "14px", lineHeight: "1.7", marginBottom: "10px" }}>
+              We've sent a password reset link to:
+            </p>
+
+            <p style={{ fontWeight: "600", color: colors.primary, marginBottom: "18px" }}>
+              {resetEmail}
+            </p>
+
+            <p style={{ color: "#64748B", fontSize: "13px", lineHeight: "1.6", marginBottom: "28px" }}>
+              Please check your inbox and follow the instructions to create a new password.
+              <br />
+              <br />
+              If you don't see the email, check your Spam or Junk folder.
+            </p>
+
+            <button
+              style={btnStyle}
+              onClick={() => {
+                setShowSuccessModal(false);
+                setView("login");
+                setResetEmail("");
+              }}
+            >
+              Back to Login
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-
-

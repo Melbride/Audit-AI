@@ -41,7 +41,7 @@ function PasswordResetDone() {
           </p>
           <p style={{ fontSize: "13px", color: "#aab", marginBottom: "32px" }}>If you don't see it, check your spam folder.</p>
           <Link to="/login" style={{ padding: "13px 32px", background: colors.primary, color: colors.white, borderRadius: "8px", fontSize: "15px", fontWeight: "600", textDecoration: "none" }}>
-            ← Back to Login
+            Back to Login
           </Link>
         </div>
       </div>
