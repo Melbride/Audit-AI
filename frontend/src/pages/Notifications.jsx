@@ -15,21 +15,7 @@ export default function Notifications({ user }) {
     handleMarkRead(n);
     localStorage.setItem('pendingFileId', fileId);
     localStorage.setItem('pendingClientId', clientId);
-    
-    // First check if file exists
-    try {
-      const previewRes = await getFilePreview(fileId, clientId);
-      const fileData = previewRes.data || previewRes;
-      if (fileData.fileNotFound || (fileData.error && fileData.error.includes("File not found"))) {
-        alert("This file is no longer available. It may have been deleted. Please contact your administrator or upload a new file.");
-        return;
-      }
-    } catch (err) {
-      console.error("Failed to check file existence:", err);
-      alert("Unable to verify file status. Please try again later.");
-      return;
-    }
-    
+
     try {
       const res = await openWorkspace({
         user_id: user.user_id,
@@ -37,18 +23,18 @@ export default function Notifications({ user }) {
         client_id: String(clientId) // Ensure client_id is a string
       });
       const ws = res.data || res;
-      console.log("Workspace response:", ws);
       if (ws && ws.workspace_id) {
         navigate(`/workspace/${ws.workspace_id}`);
         return;
       } else {
         console.error("No workspace_id in response:", ws);
+        alert("Could not open workspace. Please try again.");
       }
     } catch (err) {
-      console.error("Workspace open failed, falling back to mapping", err);
+      console.error("Failed to open workspace:", err);
       console.error("Error details:", err.response?.data || err.message);
+      alert(err.response?.data?.detail || "Could not open workspace. Please try again.");
     }
-    navigate('/mapping');
   };
 
   // Fetches the current user's notifications from the API
@@ -186,8 +172,6 @@ export default function Notifications({ user }) {
                       onClick={(e) => {
                         e.stopPropagation();
                         handleMarkRead(n);
-                        // Navigate to the latest submission for this engagement's section
-                        // For now, navigate to engagement detail - user can click on submission from there
                         navigate(`/engagements/${engagementId}`);
                       }}
                       className="notif-btn-proceed"

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { confirmPasswordReset } from "../services/api";
+import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 const colors = {
   primary: "#1E3A5F",
@@ -90,9 +91,25 @@ function SetNewPassword() {
                   required
                   style={{ ...inputStyle, paddingRight: "44px" }}
                 />
-                <button type="button" onClick={() => setShowPassword1(!showPassword1)}
-                  style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#7f8c8d" }}>
-                  {showPassword1 ? "🙈" : "👁"}
+                <button
+                  type="button" 
+                  onClick={() => setShowPassword1(!showPassword1)}
+                  style={{
+                  position: "absolute",
+                  right: "12px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#7f8c8d",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+                >
+                  {showPassword1 ? <FaEyeSlash size={18} /> : <FaEye size={18} />}
                 </button>
               </div>
               {errors.newPassword && <p style={{ color: colors.danger, fontSize: "12px", marginTop: "4px" }}>{errors.newPassword}</p>}
@@ -109,9 +126,25 @@ function SetNewPassword() {
                   required
                   style={{ ...inputStyle, paddingRight: "44px" }}
                 />
-                <button type="button" onClick={() => setShowPassword2(!showPassword2)}
-                  style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#7f8c8d" }}>
-                  {showPassword2 ? "🙈" : "👁"}
+                <button
+                  type="button"
+                  onClick={() => setShowPassword2(!showPassword2)}
+                  style={{
+                    position: "absolute",
+                    right: "12px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#7f8c8d",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                  }}
+                  >
+                  {showPassword2 ? <FaEyeSlash size={18} /> : <FaEye size={18} />}
                 </button>
               </div>
               {errors.confirmPassword && <p style={{ color: colors.danger, fontSize: "12px", marginTop: "4px" }}>{errors.confirmPassword}</p>}

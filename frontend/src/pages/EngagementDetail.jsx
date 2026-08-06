@@ -168,7 +168,7 @@ export default function EngagementDetail({ user }) {
       </div>
 
       {/* Allow Engagement Partner, Quality Reviewer, and Admin to send the final approved report to the client */}
-      {["Engagement Partner", "Quality Reviewer", "Admin"].includes(
+      {["Engagement Partner"].includes(
         user.role
       ) &&
         sections.some(

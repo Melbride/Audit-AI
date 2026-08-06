@@ -638,13 +638,15 @@ def create_submission(s: Submission, db=Depends(get_db)):
         if info:
             message = f"{info['section_name']} for {info['engagement_name']} is now {s.status}"
             cursor.execute("""
-                SELECT u.user_id FROM users u
+                SELECT DISTINCT u.user_id FROM users u
                 INNER JOIN engagement_team et ON u.user_id = et.user_id
-                WHERE et.engagement_id = %s AND u.role = %s
+                WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) = %s
             """, (s.engagement_id, s.current_stage))
             for auditor in cursor.fetchall():
-                cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
-                               (auditor['user_id'], message, 'engagement_alert'))
+                cursor.execute(
+                    "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                    (auditor['user_id'], message, "submission_review", s.engagement_id)
+                )
     db.commit()
     return {"submission_id": submission_id, "message": "Submission created"}
 def auto_update_engagement_status(engagement_id: int, db):
@@ -723,14 +725,17 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
 
     if target_roles:
         message = f"{sub['section_name']} for {sub['engagement_name']} is now {s.status}"
+        format_strings = ','.join(['%s'] * len(target_roles))
         cursor2.execute(f"""
-            SELECT u.user_id FROM users u
+            SELECT DISTINCT u.user_id FROM users u
             INNER JOIN engagement_team et ON u.user_id = et.user_id
-            WHERE et.engagement_id = %s AND u.role IN ({','.join(['%s']*len(target_roles))})
+            WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) IN ({format_strings})
         """, (sub['engagement_id'], *target_roles))
         for row in cursor2.fetchall():
-            cursor2.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
-                            (row['user_id'], message, "engagement_alert"))
+            cursor2.execute(
+                "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                (row['user_id'], message, "submission_review", sub['engagement_id'])
+            )
 
     # Auto-update engagement status based on all section submission states
     auto_update_engagement_status(sub['engagement_id'], db)

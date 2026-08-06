@@ -3,10 +3,23 @@ import { useParams, useNavigate } from "react-router-dom";
 import { getSubmissionReviewData, updateSubmissionStatus, createSubmission } from "../services/api";
 import "../styles/EngagementDetail.css";
 
-const WORKFLOW = [
-  "Accountant", "Auditor", "Senior Auditor", "Assistant Manager",
-  "Audit Manager", "Engagement Partner", "Quality Reviewer",
-];
+// Forward always skips "Auditor" — once submitted, their work is done.
+// "Auditor" only ever reappears as a RETURN target, never a forward step.
+const FORWARD_MAP = {
+  "Accountant": "Senior Auditor",
+  "Senior Auditor": "Assistant Manager",
+  "Assistant Manager": "Audit Manager",
+  "Audit Manager": "Engagement Partner",
+  "Engagement Partner": "Quality Reviewer",
+};
+
+const RETURN_MAP = {
+  "Senior Auditor": "Auditor",
+  "Assistant Manager": "Senior Auditor",
+  "Audit Manager": "Assistant Manager",
+  "Engagement Partner": "Audit Manager",
+  "Quality Reviewer": "Engagement Partner",
+};
 
 const fmt = (n) => n == null ? "—" : new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 }).format(n);
 
@@ -63,21 +76,25 @@ export default function SubmissionReviewPage({ user }) {
   const status = submission.status || "Draft";
   const role = user?.role;
 
-  const currentIndex = WORKFLOW.indexOf(stage);
-  const prevStage = currentIndex > 0 ? WORKFLOW[currentIndex - 1] : null;
-  const nextStage = currentIndex < WORKFLOW.length - 1 ? WORKFLOW[currentIndex + 1] : null;
-  const isLastStage = currentIndex === WORKFLOW.length - 1;
+  const nextStage = FORWARD_MAP[stage] || null;
+  const prevStage = RETURN_MAP[stage] || null;
+  const isLastStage = stage === "Quality Reviewer";
+  const isAuditorStage = stage === "Auditor"; // returned for corrections — not a forward/return step, they must fix + resubmit via their workspace
   const canAct = role === stage && status !== "Approved" && status !== "Cancelled";
+  const isTerminal = status === "Approved" || status === "Cancelled";
 
   return (
     <div className="engagement-detail">
       <button className="back-button" onClick={() => navigate(`/engagements/${submission.engagement_id}`)}>
-        ← Back to Engagement
+        Back to Engagement
       </button>
 
       <div className="engagement-header">
         <h1>{submission.section_name} — {submission.engagement_name}</h1>
-        <p>File: {file?.filename || "—"} · Status: {status} · Currently with: {stage}</p>
+        <p>
+          File: {file?.filename || "—"} · Status: {status}
+          {!isTerminal && ` · Currently with: ${stage}`}
+        </p>
       </div>
 
       {/* File & Cleaning Summary */}
@@ -85,7 +102,7 @@ export default function SubmissionReviewPage({ user }) {
         <h3>Cleaning Summary</h3>
         {cleaning_summary ? (
           <p>
-            {cleaning_summary.can_proceed ? "✅ All issues resolved" : "⚠️ Unresolved issues remain"} —{" "}
+            {cleaning_summary.can_proceed ? "All issues resolved" : "Unresolved issues remain"} —{" "}
             {cleaning_summary.clean_rows} clean rows, {cleaning_summary.flagged_rows} flagged rows,{" "}
             {cleaning_summary.total_issues} total issue(s)
           </p>
@@ -99,8 +116,8 @@ export default function SubmissionReviewPage({ user }) {
           {trial_balance_validation?.applicable ? (
             <p>
               {trial_balance_validation.is_balanced
-                ? "✅ Trial balance is balanced"
-                : `⚠️ Difference of ${fmt(Math.abs(trial_balance_validation.difference))}`}
+                ? "Trial balance is balanced"
+                : `Difference of ${fmt(Math.abs(trial_balance_validation.difference))}`}
               {" — "}Debits: {fmt(trial_balance_validation.total_debits)}, Credits: {fmt(trial_balance_validation.total_credits)}
             </p>
           ) : <p>Not yet available.</p>}
@@ -128,7 +145,7 @@ export default function SubmissionReviewPage({ user }) {
               className="action-btn secondary"
               onClick={() => navigate("/analysis", { state: { savedAnalysis: saved_analysis, isViewMode: true } })}
             >
-              View Full Analysis →
+              View Full Analysis 
             </button>
           </>
         ) : <p>No saved analysis yet for this file.</p>}
@@ -139,10 +156,15 @@ export default function SubmissionReviewPage({ user }) {
         <h3>Review Actions</h3>
         {status === "Approved" && <p className="workflow-approved">Approved</p>}
         {status === "Cancelled" && <p className="workflow-cancelled">Cancelled</p>}
-        {status !== "Approved" && status !== "Cancelled" && !canAct && (
+        {!isTerminal && isAuditorStage && (
+          <p className="workflow-text">
+            This submission was returned for corrections. Please fix the issue in your Workspace and resubmit.
+          </p>
+        )}
+        {!isTerminal && !isAuditorStage && !canAct && (
           <p className="workflow-text">Waiting on {stage}</p>
         )}
-        {canAct && (
+        {canAct && !isAuditorStage && (
           <div className="workflow-actions">
             <div className="workflow-buttons">
               {isLastStage ? (

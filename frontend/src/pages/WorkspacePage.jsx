@@ -56,6 +56,16 @@ export default function WorkspacePage({ user }) {
 
   const status = getDerivedStatus();
 
+  // Auto-persist the derived status to the DB whenever it changes, so pages
+  // like My Workspaces (which read the raw stored column) stay accurate
+  // without requiring the auditor to manually click "Save Changes"
+  useEffect(() => {
+    if (!workspace?.workspace_id) return;
+    updateWorkspace(workspace.workspace_id, { status }).catch((err) =>
+      console.error("Failed to sync workspace status", err)
+    );
+  }, [status, workspace?.workspace_id]);
+
   useEffect(() => {
     if (workspaceId) {
       loadWorkspaceData(workspaceId);
@@ -69,8 +79,8 @@ export default function WorkspacePage({ user }) {
         if (workspace?.file_id && workspace?.client_id) {
           loadFileResumeState(workspace.file_id, workspace.client_id);
         }
-        if (workspace?.section_id) {
-          loadSectionSubmission(workspace.section_id);
+        if (workspace?.section_id && workspace?.file_id) {
+          loadSectionSubmission(workspace.section_id, workspace.file_id);
         }
       }
     };
@@ -92,8 +102,8 @@ export default function WorkspacePage({ user }) {
         loadFilePreviewData(data.file_id, data.client_id);
         loadFileResumeState(data.file_id, data.client_id);
       }
-      if (data.section_id) {
-        loadSectionSubmission(data.section_id);
+      if (data.section_id && data.file_id) {
+        loadSectionSubmission(data.section_id, data.file_id);
       }
 
       if (data.engagement_id && user && ["Audit Manager", "Engagement Partner", "Admin"].includes(user.role)) {
@@ -151,13 +161,13 @@ export default function WorkspacePage({ user }) {
     }
   };
 
-  const loadSectionSubmission = async (sectionId) => {
-    if (!sectionId || !workspace?.file_id) {
+  const loadSectionSubmission = async (sectionId, fileId) => {
+    if (!sectionId || !fileId) {
       setSectionSubmission(null);
       return;
     }
     try {
-      const res = await getSectionLatestSubmission(sectionId, workspace.file_id);
+      const res = await getSectionLatestSubmission(sectionId, fileId);
       setSectionSubmission(res.data || res || null);
     } catch (err) {
       console.error("Failed to load section submission", err);
@@ -192,8 +202,8 @@ export default function WorkspacePage({ user }) {
         submitted_by: user.user_id,
         notes,
       });
-      if (workspace.section_id) {
-        await loadSectionSubmission(workspace.section_id);
+      if (workspace.section_id && workspace.file_id) {
+        await loadSectionSubmission(workspace.section_id, workspace.file_id);
       }
       setShowSuccessModal(true);
       setTimeout(() => setShowSuccessModal(false), 3000);
@@ -826,6 +836,45 @@ export default function WorkspacePage({ user }) {
           </div>
         </div>
       </div>
+
+      {/* Return Notice Banner */}
+      {sectionSubmission?.status === "Changes Requested" && (
+        <div className="card return-notice-card" style={{ backgroundColor: "#fffbe6", marginBottom: "20px", padding: "16px", borderLeft: "4px solid #f59e0b" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+            <span style={{ fontSize: "20px" }}>⚠️</span>
+            <h3 style={{ margin: 0, color: "#b45309" }}>Changes Requested by Reviewer</h3>
+          </div>
+          {sectionSubmission.notes && (
+            <p style={{ marginTop: "4px", marginBottom: "12px", fontStyle: "italic", color: "#451a03", background: "#ffffff", padding: "10px 14px", borderRadius: "6px", border: "1px solid #fde68a" }}>
+              "{sectionSubmission.notes}"
+            </p>
+          )}
+          <p style={{ fontSize: "13px", color: "#78350f", marginBottom: "12px" }}>
+            This submission was returned for corrections. Select a stage below to make the required adjustments:
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <button className="btn-save" onClick={handleNavigateToMapping} style={{ fontSize: "12px", padding: "6px 12px" }}>
+              Go to Column Mapping
+            </button>
+            <button className="btn-save" onClick={handleNavigateToClean} style={{ fontSize: "12px", padding: "6px 12px" }}>
+              Go to Data Cleaning
+            </button>
+            {isTrialBalance && (
+              <>
+                <button className="btn-save" onClick={handleNavigateToTrialBalance} style={{ fontSize: "12px", padding: "6px 12px" }}>
+                  Go to TB Validation
+                </button>
+                <button className="btn-save" onClick={handleNavigateToAccountMapping} style={{ fontSize: "12px", padding: "6px 12px" }}>
+                  Go to Account Mapping
+                </button>
+              </>
+            )}
+            <button className="btn-save" onClick={handleNavigateToAnalysis} style={{ fontSize: "12px", padding: "6px 12px" }}>
+              Go to Financial Analysis
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Audit Execution Hub - Main Card */}
       <div className="card execution-hub-card">

@@ -114,7 +114,7 @@ export const getAuditSections = (engagementId) =>
 
 // Send completed audit report to client via email
 export const sendToClient = (engagementId) =>
-    API.post(`/engagements/${engagementId}/send-to-client`)
+    API.put(`/engagements/${engagementId}/send-to-client`)
 
 // NOTIFICATIONS: Get all notifications for a user
 export const getNotifications = (userId) =>
