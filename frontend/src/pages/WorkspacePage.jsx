@@ -217,6 +217,13 @@ export default function WorkspacePage({ user }) {
 
   const isTrialBalance = fileResumeState?.file_type === 'trial_balance' || fileResumeState?.file_type === 'general_ledger';
 
+  // Once a submission exists and is Submitted/Under Review/Approved, it
+  // can't be submitted again from here — only after a reviewer sends it
+  // back ("Changes Requested") does the Submit button become usable again.
+  const alreadySubmitted = ["Submitted", "Under Review", "Approved"].includes(
+    sectionSubmission?.status
+  );
+
   const handleNavigateToMapping = async () => {
     const fId = workspace?.file_id;
     const cId = workspace?.client_id;
@@ -932,9 +939,15 @@ export default function WorkspacePage({ user }) {
                 </div>
                 <div className="resume-button-inline">
                   {fileResumeState?.stage === 'analysis' ? (
-                    <button className="btn-save" onClick={handleSubmitForReview} disabled={submitting}>
-                      {submitting ? "Submitting..." : "Submit for Review"}
-                    </button>
+                    alreadySubmitted ? (
+                      <span className="status-note">
+                        Already submitted — status: {sectionSubmission.status}
+                      </span>
+                    ) : (
+                      <button className="btn-save" onClick={handleSubmitForReview} disabled={submitting}>
+                        {submitting ? "Submitting..." : "Submit for Review"}
+                      </button>
+                    )
                   ) : (
                     <button 
                       className="btn-save" 

@@ -187,6 +187,7 @@ export default function AnalysisPage({ user }) {
   const [insights, setInsights] = useState(null);
   const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | "saved" | "error"
   const [submitStatus, setSubmitStatus] = useState(null); // null | "submitting" | "submitted" | "error"
+  const [submitError, setSubmitError] = useState(null);
 
   // Optional engagement fetch — only used for the "Generate Report" button context
   useEffect(() => {
@@ -271,6 +272,7 @@ export default function AnalysisPage({ user }) {
   const handleSubmitForReview = async () => {
     if (!user || !fileId || !clientId) return;
     setSubmitStatus("submitting");
+    setSubmitError(null);
     try {
       const wsRes = await openWorkspace({
         user_id: user.user_id,
@@ -287,6 +289,7 @@ export default function AnalysisPage({ user }) {
       setSubmitStatus("submitted");
     } catch (err) {
       console.error("Failed to submit for review:", err);
+      setSubmitError(err.response?.data?.detail || null);
       setSubmitStatus("error");
     }
   };
@@ -372,7 +375,7 @@ export default function AnalysisPage({ user }) {
             </button>
           ) : (
             <>
-              {analysisData && (
+              {analysisData && user?.role === "Auditor" && (
                 <>
                   {saveStatus === "saved" && <span className="save-status save-status--ok">Saved</span>}
                   {saveStatus === "error" && <span className="save-status save-status--error">Save failed</span>}
@@ -387,7 +390,7 @@ export default function AnalysisPage({ user }) {
                       {submitStatus === "submitting" ? "Submitting..." : "Submit for Review"}
                     </button>
                   )}
-                  {submitStatus === "error" && <span className="save-status save-status--error">Submit failed</span>}
+                  {submitStatus === "error" && <span className="save-status save-status--error">{submitError || "Submit failed"}</span>}
                 </>
               )}
               {engagement && (

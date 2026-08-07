@@ -3171,6 +3171,19 @@ def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, 
     )
     existing = cursor.fetchone()
 
+    # Block resubmission of a file that's already been submitted and hasn't
+    # been sent back for corrections — only Draft/Cancelled/Changes Requested
+    # (or no prior submission at all) may be (re)submitted
+    if existing and existing["status"] in ("Submitted", "Under Review", "Approved"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This file has already been submitted and is currently "
+                f"'{existing['status']}'. It can only be resubmitted after "
+                f"changes are requested by a reviewer."
+            )
+        )
+
     write_cursor = db.cursor()
     if existing:
         write_cursor.execute(
@@ -3206,9 +3219,7 @@ def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, 
                 (row["user_id"], message, "submission_review", engagement_id)
             )
         db.commit()
-
     return {"submission_id": submission_id, "section_id": section_id, "message": "Submitted for review successfully."}
-
 
 # Run the app directly with uvicorn when this file is executed as a script
 if __name__ == "__main__":

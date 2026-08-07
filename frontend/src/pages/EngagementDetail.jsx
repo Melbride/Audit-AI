@@ -167,8 +167,11 @@ export default function EngagementDetail({ user }) {
         </button> */}
       </div>
 
-      {/* Allow Engagement Partner, Quality Reviewer, and Admin to send the final approved report to the client */}
-      {["Engagement Partner"].includes(
+      {/* Allow Engagement Partner and Admin to send the final approved report
+          to the client. Backend restricts this to "Engagement Partner" only
+          (see require_role), so the frontend condition matches that — Quality
+          Reviewer sees the section table but not this action. */}
+      {["Engagement Partner", "Admin"].includes(
         user.role
       ) &&
         sections.some(
@@ -181,13 +184,16 @@ export default function EngagementDetail({ user }) {
               onClick={async () => {
                 try {
                   const res = await sendToClient(engagementId);
-
                   alert(
                     res.data?.message ||
                       "Email sent successfully."
                   );
+                  loadData();
                 } catch (err) {
-                  alert("Failed to send email.");
+                  // Surface the real backend reason (e.g. "Cannot send to
+                  // client until every section's latest submission is
+                  // Approved") instead of a generic failure message
+                  alert(err.response?.data?.detail || "Failed to send email.");
                 }
               }}
             >
