@@ -89,6 +89,7 @@ def generate_financial_statements(df: pd.DataFrame, mapping: dict, account_mappi
                 debit_col = "debit"
             elif info.get("mapped_to") == "credit":
                 credit_col = "credit"
+    
     # When the columns are identified, check if all three are present. If any are missing, return a result indicating that the statements cannot be generated.
     if not account_name_col or not debit_col or not credit_col:
         return {
@@ -98,15 +99,40 @@ def generate_financial_statements(df: pd.DataFrame, mapping: dict, account_mappi
                 "columns to be mapped."
             ),
         }
+    
+    # Check if the columns actually exist in the dataframe
+    if account_name_col not in df.columns or debit_col not in df.columns or credit_col not in df.columns:
+        return {
+            "applicable": False,
+            "message": (
+                "Financial statements require 'Account Name', 'Debit', and 'Credit' "
+                "columns to exist in the data file."
+            ),
+        }
+    
     # Convert the debit and credit columns to numeric values, coercing errors to NaN and filling them with 0.
     debit_values = pd.to_numeric(df[debit_col], errors="coerce").fillna(0)
     credit_values = pd.to_numeric(df[credit_col], errors="coerce").fillna(0)
+    
     # Group the DataFrame by account name and sum the debit and credit values for each account.
-    grouped = pd.DataFrame({
-        "account_name": df[account_name_col],
+    # Handle empty account names gracefully
+    temp_df = pd.DataFrame({
+        "account_name": df[account_name_col].astype(str).str.strip(),
         "debit": debit_values,
         "credit": credit_values,
-    }).groupby("account_name", as_index=False).sum()
+    })
+    
+    # Remove rows with empty account names
+    temp_df = temp_df[temp_df["account_name"] != ""]
+    temp_df = temp_df.dropna(subset=["account_name"])
+    
+    if temp_df.empty:
+        return {
+            "applicable": False,
+            "message": "No valid account names found in the data.",
+        }
+    
+    grouped = temp_df.groupby("account_name", as_index=False).sum()
     # Initialize lists to hold unclassified accounts and categorized items for the income statement and balance sheet.
     unclassified_accounts = []
     # Initialize lists to hold categorized items for the income statement and balance sheet.

@@ -35,10 +35,18 @@ def calculate_breakdowns(df: pd.DataFrame, mapping: dict, max_unique_ratio: floa
     numeric_columns = get_columns_by_type(mapping, df, "numeric")
     text_columns = get_columns_by_type(mapping, df, "text")
 
+    # Handle empty dataframe or missing columns gracefully
+    if df.empty or not numeric_columns or not text_columns:
+        return {}
+
     total_rows = len(df)
     breakdowns = {}
 
     for text_col in text_columns:
+        # Skip if column doesn't exist in dataframe
+        if text_col not in df.columns:
+            continue
+            
         unique_count = df[text_col].nunique()
 
         # Skip columns with too few values to group, or too many unique 
@@ -49,10 +57,21 @@ def calculate_breakdowns(df: pd.DataFrame, mapping: dict, max_unique_ratio: floa
             continue
 
         for num_col in numeric_columns:
+            # Skip if column doesn't exist in dataframe
+            if num_col not in df.columns:
+                continue
+                
             key = f"{num_col}_by_{text_col}"
             try:
-                grouped = df.groupby(text_col)[num_col].sum()
-                breakdowns[key] = grouped.to_dict()
+                # Handle empty or null values gracefully
+                temp_df = df[[text_col, num_col]].dropna(subset=[text_col, num_col])
+                if temp_df.empty:
+                    continue
+                grouped = temp_df.groupby(text_col)[num_col].sum()
+                # Filter out zero or empty values
+                grouped = grouped[grouped != 0]
+                if not grouped.empty:
+                    breakdowns[key] = grouped.to_dict()
             except Exception:
                 continue
 
@@ -63,6 +82,7 @@ def calculate_monthly_trend(df: pd.DataFrame, mapping: dict) -> dict:
     """
     For every date column and every numeric column found, groups by month.
     Returns empty dict if no date column or numeric column exists in the file.
+    Handles empty columns and missing data gracefully.
     """
     date_columns = get_columns_by_type(mapping, df, "date")
     numeric_columns = get_columns_by_type(mapping, df, "numeric")
@@ -70,8 +90,16 @@ def calculate_monthly_trend(df: pd.DataFrame, mapping: dict) -> dict:
     if not date_columns or not numeric_columns:
         return {}
 
+    # Handle empty dataframe gracefully
+    if df.empty:
+        return {}
+
     trends = {}
     for date_col in date_columns:
+        # Skip if column doesn't exist in dataframe
+        if date_col not in df.columns:
+            continue
+            
         try:
             parsed_dates = pd.to_datetime(df[date_col], errors="coerce")
             month_series = parsed_dates.dt.to_period("M").astype(str)
@@ -79,17 +107,30 @@ def calculate_monthly_trend(df: pd.DataFrame, mapping: dict) -> dict:
             continue
 
         for num_col in numeric_columns:
+            # Skip if column doesn't exist in dataframe
+            if num_col not in df.columns:
+                continue
+                
             key = f"{num_col}_by_{date_col}_month"
             try:
                 temp = pd.DataFrame({
                     "month": month_series,
                     "value": df[num_col]
-                }).dropna(subset=["month"])
+                }).dropna(subset=["month", "value"])
+                
+                # Skip if no valid data after cleaning
+                if temp.empty:
+                    continue
+                    
                 grouped = temp.groupby("month")["value"].sum().sort_index()
-                trends[key] = [
-                    {"period": period, "total": float(total)}
-                    for period, total in grouped.items()
-                ]
+                # Filter out zero values
+                grouped = grouped[grouped != 0]
+                
+                if not grouped.empty:
+                    trends[key] = [
+                        {"period": period, "total": float(total)}
+                        for period, total in grouped.items()
+                    ]
             except Exception:
                 continue
 
@@ -200,7 +241,7 @@ Example output format:
 ]"""
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[
             {
                 "role": "system",

@@ -982,6 +982,100 @@ def get_cleaning_snapshot(file_id: str, client_id: str, file_type: str):
     finally:
         conn.close()
 
+# Check if all audit sections for an engagement are completed
+def check_all_sections_completed(engagement_id: int) -> dict:
+    
+    """
+    Check if all audit sections for an engagement are completed.
+
+    "Completed" is derived from the latest submission per section having
+    status 'Approved' — the same signal fetch_engagement_progress() uses
+    for the engagement's display_status — NOT from audit_sections.status,
+    which is a free-text field only ever set by a human via the manual
+    section-edit endpoint and is not tied to the actual approval workflow.
+    A section with no submissions at all is treated as pending.
+
+    Sections marked in_scope=0 are excluded from all_completed/pending —
+    they are never required for report generation — and are reported
+    separately in excluded_sections so callers can still show them
+    (e.g. "Cash & Bank — Not in Scope") rather than silently dropping them.
+
+    Returns a dict with:
+    - all_completed: bool indicating if all IN-SCOPE sections are approved
+    - completed_sections: list of approved, in-scope section names
+    - pending_sections: list of not-yet-approved, in-scope section names
+    - excluded_sections: list of out-of-scope section names (not required)
+    - total_sections: total number of in-scope sections
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT sec.section_name,
+               sec.in_scope,
+               latest.status AS latest_status
+        FROM audit_sections sec
+        LEFT JOIN (
+            SELECT section_id, status,
+                   ROW_NUMBER() OVER (PARTITION BY section_id ORDER BY created_at DESC) AS rn
+            FROM submissions
+            WHERE engagement_id = %s
+        ) latest ON latest.section_id = sec.section_id AND latest.rn = 1
+        WHERE sec.engagement_id = %s
+    """, (engagement_id, engagement_id))
+
+    sections = cursor.fetchall()
+    conn.close()
+
+    in_scope_sections = [s for s in sections if s['in_scope']]
+    excluded_sections = [s['section_name'] for s in sections if not s['in_scope']]
+
+    completed_sections = [s['section_name'] for s in in_scope_sections if s['latest_status'] == 'Approved']
+    pending_sections = [s['section_name'] for s in in_scope_sections if s['latest_status'] != 'Approved']
+
+    return {
+        'all_completed': len(in_scope_sections) > 0 and len(pending_sections) == 0,
+        'completed_sections': completed_sections,
+        'pending_sections': pending_sections,
+        'excluded_sections': excluded_sections,
+        'total_sections': len(in_scope_sections)
+    }
+
+# Get all section data for an engagement (for combined report generation)
+def get_all_sections_data(engagement_id: int) -> dict:
+    """
+    Get all section data for an engagement to use in combined report generation.
+    Returns a dict with section names as keys and their latest submission data as values.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute("""
+        SELECT sec.section_name, s.status, s.current_stage, s.notes, s.created_at
+        FROM audit_sections sec
+        LEFT JOIN submissions s ON sec.section_id = s.section_id
+        WHERE sec.engagement_id = %s
+        ORDER BY sec.section_name, s.created_at DESC
+    """, (engagement_id,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # Group by section name and take the latest submission for each
+    sections_data = {}
+    for row in rows:
+        section_name = row['section_name']
+        if section_name not in sections_data:
+            sections_data[section_name] = {
+                'section_name': section_name,
+                'status': row['status'] or 'Pending',
+                'current_stage': row['current_stage'],
+                'notes': row['notes'],
+                'latest_submission_date': row['created_at']
+            }
+    
+    return sections_data
+
 # Save the final cleaned version of a file to the cleaned_files_registry table.
 def save_cleaned_registry(file_id: str, client_id: str, file_type: str, cleaned_df, report: dict, filename: str = None):
     """
