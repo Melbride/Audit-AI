@@ -174,6 +174,18 @@ export const uploadFile = (formData) =>
         headers: { 'Content-Type': 'multipart/form-data' }
     })
 
+// Inspect Excel sheets for multi-sheet file upload
+export const inspectExcelSheets = (formData) =>
+    API.post('/upload/inspect-sheets', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+
+// Get preview data for a specific Excel sheet
+export const getSheetPreview = (formData) =>
+    API.post('/upload/sheet-preview', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+
+// Generate AI insights for a file
+export const generateInsights = (clientId, formData) =>
+    API.post(`/analyze/${clientId}/insights`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+
 // Get file preview by file_id
 export const getFilePreview = (fileId, clientId) =>
     API.get(`/file-preview/${fileId}`, { params: { client_id: clientId } })

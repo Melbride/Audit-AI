@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { uploadFile, submitFile } from '../services/api'
+import { uploadFile, submitFile, inspectExcelSheets, getSheetPreview, getClients, getEngagements, getAuditSections } from '../services/api'
 import '../styles/UploadPage.css'
-import axios from 'axios'
+// import axios from 'axios'
 
 // UploadPage component allows users to upload financial documents for a selected client. It handles file selection, drag-and-drop functionality, client search and selection, and displays a preview of the uploaded file before proceeding to the mapping page.
 export default function UploadPage() {
@@ -22,6 +22,11 @@ export default function UploadPage() {
     const [selectedEngagement, setSelectedEngagement] = useState(null)
     const [sections, setSections] = useState([])
     const [selectedSectionId, setSelectedSectionId] = useState('')
+    const [sheets, setSheets] = useState([])
+    const [selectedSheet, setSelectedSheet] = useState('')
+    const [selectedSheets, setSelectedSheets] = useState([])
+    const [sheetPreview, setSheetPreview] = useState(null)
+    const [loadingPreview, setLoadingPreview] = useState(false)
 
     const clientEngagements = selectedClient
         ? engagements.filter(e => e.client_id === selectedClient.client_id)
@@ -29,10 +34,10 @@ export default function UploadPage() {
 
     // Load the client list once on mount
     useEffect(() => {
-        axios.get('http://localhost:8000/clients')
+        getClients()
             .then(res => setClients(res.data))
             .catch(err => console.error('Clients load failed', err))
-        axios.get('http://localhost:8000/engagements')
+        getEngagements()
             .then(res => setEngagements(res.data))
             .catch(err => console.error('Engagements load failed', err))
     }, [])
@@ -44,10 +49,50 @@ export default function UploadPage() {
             setSelectedSectionId('')
             return
         }
-        axios.get(`http://localhost:8000/engagements/${selectedEngagement.engagement_id}/sections`)
+        getAuditSections(selectedEngagement.engagement_id)
             .then(res => setSections(res.data))
             .catch(err => console.error('Sections load failed', err))
     }, [selectedEngagement])
+
+    const inspectSheets = async (f) => {
+        setSheets([])
+        setSelectedSheet('')
+        setSheetPreview(null)
+        const ext = f.name.split('.').pop().toLowerCase()
+        if (!['xlsx', 'xls'].includes(ext)) return
+        try {
+            const fd = new FormData()
+            fd.append('file', f)
+            const res = await inspectExcelSheets(fd)
+            const sheetInfo = res.data.sheets || []
+            if (sheetInfo.length >= 1) {
+                setSheets(sheetInfo)
+                setSelectedSheet(sheetInfo[0].name)
+                setSelectedSheets([sheetInfo[0].name])
+                // Auto-load preview for first sheet
+                loadSheetPreview(f, sheetInfo[0].name)
+            }
+        } catch (err) {
+            console.error('Sheet inspection failed', err)
+        }
+    }
+
+    const loadSheetPreview = async (f, sheetName) => {
+        if (!f || !sheetName) return
+        setLoadingPreview(true)
+        try {
+            const fd = new FormData()
+            fd.append('file', f)
+            fd.append('sheet_name', sheetName)
+            const res = await getSheetPreview(fd)
+            setSheetPreview(res.data)
+        } catch (err) {
+            console.error('Sheet preview failed', err)
+            setSheetPreview(null)
+        } finally {
+            setLoadingPreview(false)
+        }
+    }
 
     // Handles a file dropped onto the dropzone
     const onDropFile = (e) => {
@@ -56,27 +101,43 @@ export default function UploadPage() {
         if (e.dataTransfer.files?.length) {
             setFile(e.dataTransfer.files[0])
             setError('')
+            inspectSheets(e.dataTransfer.files[0])
         }
     }
-    
+
     // Handles a file picked via the file input
     const onChangeFile = (e) => {
         if (e.target.files?.length) {
             setFile(e.target.files[0])
             setError('')
+            inspectSheets(e.target.files[0])
         }
+    }
+
+    const handleSheetChange = (sheetName) => {
+        setSelectedSheet(sheetName)
+        loadSheetPreview(file, sheetName)
     }
     
     // Sends the staged file + selected client to the backend
     const handleUpload = async () => {
-        if (!selectedClient || !file || !selectedSectionId) return
+        if (!selectedClient || !file || !selectedSectionId || !selectedEngagement) return
+        if (sheets.length >= 1 && selectedSheets.length === 0) {
+            setError('Select at least one sheet before uploading.')
+            return
+        }
         setError('')
         setUploading(true)
         try {
+            const user = JSON.parse(localStorage.getItem('user'))
             const fd = new FormData()
             fd.append('file', file)
             fd.append('client_id', selectedClient.client_id)
             fd.append('section_id', selectedSectionId)
+            fd.append('engagement_id', selectedEngagement.engagement_id)
+            fd.append('uploaded_by', user.user_id)
+            if (selectedSheet) fd.append('sheet_name', selectedSheet)
+            if (selectedSheets.length > 0) fd.append('selected_sheets', JSON.stringify(selectedSheets))
             const res = await uploadFile(fd)
             setUploadResult(res.data)
         } catch (err) {
@@ -217,7 +278,7 @@ export default function UploadPage() {
                                 <span className="file-label">File staged: </span>
                                 <span className="file-name" title={file.name}>{file.name}</span>
                             </div>
-                            <button type="button" className="btn-remove-file" onClick={() => setFile(null)}>
+                            <button type="button" className="btn-remove-file" onClick={() => { setFile(null); setSheets([]); setSelectedSheet(''); setSheetPreview(null); }}>
                                 Change File
                             </button>
                         </div>
@@ -237,14 +298,83 @@ export default function UploadPage() {
                                 accept=".xlsx,.xls,.csv,.pdf,.docx"
                                 onChange={onChangeFile}
                             />
-                            <p className="drop-text">Drag & drop file here or click to browse</p>
+                            <p className="drop-text">Drag and drop file here or click to browse</p>
                         </div>
                     )}
+
+                   {sheets.length >= 1 && (
+                        <div className="field">
+                            <label className="label">Select sheets containing your work:</label>
+                            <div className="sheet-selection-container">
+                                {sheets.map((sheet, index) => (
+                                    <div
+                                        key={sheet.name}
+                                        className={`sheet-option ${selectedSheet === sheet.name ? 'selected' : ''}`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedSheets.includes(sheet.name)}
+                                            onChange={() => {
+                                                setSelectedSheets(prev =>
+                                                    prev.includes(sheet.name)
+                                                        ? prev.filter(s => s !== sheet.name)
+                                                        : [...prev, sheet.name]
+                                                )
+                                            }}
+                                        />
+                                        <div className="sheet-option-content" onClick={() => handleSheetChange(sheet.name)}>
+                                            <div className="sheet-name">{sheet.name}</div>
+                                            {/* Backend (/upload/inspect-sheets) returns "cols", not "columns" */}
+                                            <div className="sheet-meta">{sheet.rows.toLocaleString()} rows × {sheet.cols} columns</div>
+                                        </div>
+                                        {selectedSheet === sheet.name && <div className="sheet-selected-indicator">● previewing</div>}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {sheetPreview && (
+                        <div className="field">
+                            <label className="label">Preview: {selectedSheet}</label>
+                            <div className="sheet-preview-container">
+                                {loadingPreview ? (
+                                    <p className="loading-preview">Loading preview...</p>
+                                ) : (
+                                    <div className="sheet-preview-table">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    {/* Backend (/upload/sheet-preview) returns "columns", not "headers" */}
+                                                    {sheetPreview.columns.map((header, i) => (
+                                                        <th key={i}>{header}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {/* Backend "rows" is a row COUNT, not the row data.
+                                                    The actual row data lives in "preview", as an
+                                                    array of { column_name: value } records — not
+                                                    arrays — so we index each row by column name. */}
+                                                {sheetPreview.preview.map((row, i) => (
+                                                    <tr key={i}>
+                                                        {sheetPreview.columns.map((col, j) => (
+                                                            <td key={j}>{row[col]}</td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     <p className="formats">Excel (.xlsx, .xls), CSV, PDF, DOCX - Max 50MB</p>
                     {error && <div className="error">{error}</div>}
                     {/* Disabled until both a client and a file are selected */}
-                    <button className="btn" onClick={handleUpload} disabled={uploading || !selectedClient || !file || !selectedSectionId}>
-                        {uploading ? 'Uploading...' : 'Upload File'}
+                    <button className="btn" onClick={handleUpload} disabled={uploading || !selectedClient || !file || !selectedSectionId || (sheets.length >= 1 && selectedSheets.length === 0)}>                        {uploading ? 'Uploading...' : 'Upload File'}
                     </button>
                 </div>
             )}

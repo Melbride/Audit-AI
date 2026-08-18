@@ -5,14 +5,24 @@ from datetime import datetime
 # Helper functions for trial balance validation
 def get_standardized_field(mapping: dict, target: str) -> str | None:
     """
-    Returns the standardized field name for a given mapped_to value.
+    Returns the actual column name in the DataFrame for a given standardized target.
     The cleaning step has already renamed dataframe columns to their
     standardized names, so this helper confirms whether a required field
-    was mapped and returns that standardized field name.
+    was mapped and returns the actual column name to use for DataFrame access.
     """
+    # Define alternative names for each target to handle different mapping conventions
+    alternatives = {
+        "debit": ["debit", "debit_amount"],
+        "credit": ["credit", "credit_amount"],
+        "account_name": ["account_name", "account_description"],
+        "account_code": ["account_code", "account_number"]
+    }
+    
+    valid_targets = alternatives.get(target, [target])
+    
     for info in mapping.values():
-        if isinstance(info, dict) and info.get("mapped_to") == target:
-            return target
+        if isinstance(info, dict) and info.get("mapped_to") in valid_targets:
+            return info.get("mapped_to")  # Return the actual mapped column name
     return None
 
 # trial balance validation functions

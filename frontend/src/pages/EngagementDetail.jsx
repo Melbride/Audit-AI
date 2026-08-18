@@ -165,7 +165,35 @@ export default function EngagementDetail({ user }) {
         >
           {downloadingTemplate ? "Preparing…" : "Download Statement Template"}
         </button> */}
-      </div>
+     </div>
+
+      {/* Engagement-level readiness card: appears once every in-scope
+          section is approved. display_status comes from the existing
+          backend calculation (apply_display_status) — nothing recalculated here. */}
+      {engagement.display_status === "Under Review" && (
+        <div
+          style={{
+            background: "#F0FDF4",
+            border: "1px solid #BBF7D0",
+            borderRadius: "8px",
+            padding: "16px 20px",
+            marginBottom: "20px",
+          }}
+        >
+          <p style={{ fontWeight: 700, color: "#166534", marginBottom: "4px" }}>
+            Engagement Ready for Analysis
+          </p>
+          <p style={{ color: "#166534", marginBottom: "12px" }}>
+            All in-scope sections have been completed and approved.
+          </p>
+          <button
+            className="action-btn secondary"
+            onClick={() => alert("Analysis integration not yet connected — placeholder action.")}
+          >
+            Generate Analysis
+          </button>
+        </div>
+      )}
 
       {/* Allow Engagement Partner and Admin to send the final approved report
           to the client. Backend restricts this to "Engagement Partner" only
@@ -174,7 +202,8 @@ export default function EngagementDetail({ user }) {
       {["Engagement Partner", "Admin"].includes(
         user.role
       ) &&
-        sections.some(
+        sections.length > 0 &&
+        sections.every(
           (sec) =>
             submissions[sec.section_id]?.status === "Approved"
         ) && (

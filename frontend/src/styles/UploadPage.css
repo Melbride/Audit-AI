@@ -6,6 +6,108 @@
     margin: 0;
 }
 
+/* Sheet Selection Styles */
+.sheet-selection-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+}
+
+.sheet-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--background);
+}
+
+.sheet-option:hover {
+    border-color: var(--accent);
+    background: var(--background-hover);
+}
+
+.sheet-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+}
+
+.sheet-option-content {
+    flex: 1;
+}
+
+.sheet-name {
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+}
+
+.sheet-meta {
+    font-size: 11px;
+    color: var(--text-soft);
+}
+
+.sheet-selected-indicator {
+    color: var(--accent);
+    font-size: 16px;
+    margin-left: 8px;
+}
+
+/* Sheet Preview Styles */
+.sheet-preview-container {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    background: var(--background);
+    max-height: 200px;
+    overflow: auto;
+}
+
+.loading-preview {
+    color: var(--text-soft);
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+.sheet-preview-table {
+    overflow-x: auto;
+}
+
+.sheet-preview-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.sheet-preview-table th,
+.sheet-preview-table td {
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.sheet-preview-table th {
+    background: var(--background-hover);
+    font-weight: 600;
+    color: var(--text);
+    position: sticky;
+    top: 0;
+}
+
+.sheet-preview-table td {
+    color: var(--text);
+}
+
 .card, .preview-card {
     max-width: 100%;
     margin: 0 auto 4px;

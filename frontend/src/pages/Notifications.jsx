@@ -136,6 +136,7 @@ export default function Notifications({ user }) {
             const { baseMessage, fileId, clientId, engagementId } = parseNotificationDetails(n);
             const isFileSubmission = n.type === 'file_submission' && fileId;
             const isSubmissionReview = n.type === 'submission_review' && engagementId;
+            const isEngagementReady = n.type === 'engagement_ready' && engagementId;
 
             return (
             <div
@@ -152,7 +153,7 @@ export default function Notifications({ user }) {
                 <span className="notif-timestamp">{formatDate(n.created_at)}</span>
 
                 {/* Action buttons for file submissions */}
-                {isFileSubmission && (
+                {isFileSubmission && user.role === "Auditor" && (
                   <div className="notif-actions">
                     <button
                       onClick={(e) => {
@@ -177,6 +178,21 @@ export default function Notifications({ user }) {
                       className="notif-btn-proceed"
                     >
                       Review Submission
+                    </button>
+                  </div>
+                )}
+
+                {isEngagementReady && (
+                  <div className="notif-actions">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkRead(n);
+                        navigate(`/engagements/${engagementId}`);
+                      }}
+                      className="notif-btn-proceed"
+                    >
+                      Review Engagement
                     </button>
                   </div>
                 )}

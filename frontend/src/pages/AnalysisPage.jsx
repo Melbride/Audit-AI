@@ -26,7 +26,22 @@ import "../styles/analysis.css";
 const API_BASE = "http://localhost:8000";
 
 // ── COLORS (chart fills — kept as literal hex since donut/bar slices need a fixed sequence) ──
-const CHART_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#27ae60", "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"];
+const CHART_COLORS = ["#2563eb", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#f97316"];
+
+// ── SEVERITY SORTING ─────────────────────────────────────────────────────────────
+const SEVERITY_ORDER = { high: 0, medium: 1, info: 2 };
+
+const effectiveSeverity = (insight) => {
+  if (insight.severity) return insight.severity;
+  const cfg = SEVERITY_CONFIG[insight.type];
+  if (!cfg) return "info";
+  if (cfg.tone === "danger") return "high";
+  if (cfg.tone === "warning") return "medium";
+  return "info";
+};
+
+const sortBySeverity = (arr) =>
+  [...(arr || [])].sort((a, b) => SEVERITY_ORDER[effectiveSeverity(a)] - SEVERITY_ORDER[effectiveSeverity(b)]);
 
 // icon + label + semantic tone; tone drives color via CSS (data-tone attribute)
 const SEVERITY_CONFIG = {
@@ -185,6 +200,7 @@ export default function AnalysisPage({ user }) {
   const [error, setError] = useState(null);
   const [analysisData, setAnalysisData] = useState(null);
   const [insights, setInsights] = useState(null);
+  const [expandedInsights, setExpandedInsights] = useState({});
   const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | "saved" | "error"
   const [submitStatus, setSubmitStatus] = useState(null); // null | "submitting" | "submitted" | "error"
   const [submitError, setSubmitError] = useState(null);
@@ -220,6 +236,21 @@ export default function AnalysisPage({ user }) {
         formData.append("file_type", fileType || "general");
         const response = await axios.post(`${API_BASE}/analyze/${clientId}`, formData);
         setAnalysisData(response.data);
+        
+        // Auto-generate insights after financial analysis completes
+        if (response.data && !isSavedView) {
+          try {
+            const insightsFormData = new FormData();
+            insightsFormData.append("file_id", fileId);
+            insightsFormData.append("file_type", fileType || "general");
+            const insightsResponse = await axios.post(`${API_BASE}/analyze/${clientId}/insights`, insightsFormData);
+            setInsights(insightsResponse.data.ai_insights || []);
+          } catch (insightsErr) {
+            console.error("Auto-insights generation failed:", insightsErr);
+            // Don't block the main analysis if insights fail
+            setInsights([]);
+          }
+        }
       } catch (err) {
         setError(err.response?.data?.detail || "Could not run financial analysis.");
       } finally {
@@ -244,6 +275,13 @@ export default function AnalysisPage({ user }) {
     } finally {
       setInsightsLoading(false);
     }
+  };
+
+  const toggleInsightExpansion = (index) => {
+    setExpandedInsights(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
   };
 
   // Persists the already-computed analysis + insights for this file so they
@@ -321,7 +359,7 @@ export default function AnalysisPage({ user }) {
           <h3>Saved analysis not found</h3>
           <p>The saved analysis data could not be loaded. It may have been deleted or corrupted.</p>
           <button className="btn btn-primary" style={{ marginTop: "16px" }} onClick={() => navigate("/analysis/history")}>
-            Back to History
+          Back to History
           </button>
         </div>
       </div>
@@ -368,10 +406,19 @@ export default function AnalysisPage({ user }) {
               : `${uploadResult?.filename || "—"} · Client ${clientId}`}
           </p>
         </div>
+        {/* Saved-snapshot attribution banner — who saved this and when */}
+        {isSavedView && (
+          <div className="snapshot-banner">
+            <History size={14} />
+            <span>Viewing a saved snapshot from {fmtDate(savedAnalysis.created_at)}</span>
+            {savedAnalysis.saved_by_name && <span className="snapshot-banner-user">saved by {savedAnalysis.saved_by_name}</span>}
+            {savedAnalysis.engagement_name && <span className="snapshot-banner-engagement">· {savedAnalysis.engagement_name}</span>}
+          </div>
+        )}
         <div className="page-actions">
           {isSavedView ? (
             <button className="btn btn-secondary" onClick={() => navigate("/analysis/history")}>
-              <ArrowLeft size={14} /> Back to History
+               Back to History
             </button>
           ) : (
             <>
@@ -402,16 +449,6 @@ export default function AnalysisPage({ user }) {
           )}
         </div>
       </div>
-
-      {/* Saved-snapshot attribution banner — who saved this and when */}
-      {isSavedView && (
-        <div className="banner banner--info" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <History size={14} />
-          Viewing a saved snapshot from {fmtDate(savedAnalysis.created_at)}
-          {savedAnalysis.saved_by_name ? ` — saved by ${savedAnalysis.saved_by_name}` : ""}
-          {savedAnalysis.engagement_name ? ` · ${savedAnalysis.engagement_name}` : ""}
-        </div>
-      )}
 
       {loading && (
         <div className="loading-row">
@@ -573,16 +610,21 @@ export default function AnalysisPage({ user }) {
             </div>
           )}
 
-          {/* ── AI INSIGHTS (preview) ── */}
+          {/* ── INSIGHTS (preview) ── */}
           <div>
             <div className="insights-toolbar">
               <div>
-                <h2>AI Insights</h2>
-                <p>Generate plain-language explanations of the numbers above using AI.</p>
+                <h2>Insights</h2>
+                <p>Analysis explanations and recommendations, ranked by priority.</p>
               </div>
               {!insights && !isSavedView && (
                 <button className="btn btn-primary" onClick={handleGenerateInsights} disabled={insightsLoading}>
                   {insightsLoading ? "Generating..." : "Generate Insights"}
+                </button>
+              )}
+              {insights && !isSavedView && (
+                <button className="btn btn-secondary" onClick={handleGenerateInsights} disabled={insightsLoading}>
+                  {insightsLoading ? "Regenerating..." : "Regenerate Insights"}
                 </button>
               )}
             </div>
@@ -593,19 +635,51 @@ export default function AnalysisPage({ user }) {
 
             {insights && insights.length > 0 && (
               <>
+                <p style={{ fontSize: "12px", color: "var(--text-soft)", margin: "4px 0 14px" }}>
+                  {insights.filter(i => effectiveSeverity(i) === "high").length} high-priority
+                  {" · "}{insights.filter(i => effectiveSeverity(i) === "medium").length} medium
+                  {" · "}{insights.filter(i => effectiveSeverity(i) === "info").length} info
+                </p>
                 <div className="insight-grid">
-                  {insights.slice(0, 6).map((insight, i) => {
+                  {sortBySeverity(insights).slice(0, 6).map((insight, i) => {
                     const cfg = SEVERITY_CONFIG[insight.type] || SEVERITY_CONFIG[insight.severity] || SEVERITY_CONFIG.info;
                     const IconComponent = cfg.icon;
+                    const isExpanded = expandedInsights[i];
+                    const hasDetails = insight.why || insight.recommendation;
 
                     return (
-                      <div key={i} className="insight-card">
+                      <div key={i} className={`insight-card ${isExpanded ? 'expanded' : ''}`}>
                         <div className="insight-card-body">
                           <div className="insight-card-head">
                             <IconComponent size={18} className="insight-icon" data-tone={cfg.tone} />
                             <span className="insight-tag">{cfg.label}</span>
+                            {hasDetails && (
+                              <button 
+                                className="insight-expand-btn"
+                                onClick={() => toggleInsightExpansion(i)}
+                                aria-expanded={isExpanded}
+                              >
+                                {isExpanded ? '−' : '+'}
+                              </button>
+                            )}
                           </div>
                           <p className="insight-message">{insight.message}</p>
+                          {isExpanded && hasDetails && (
+                            <div className="insight-details">
+                              {insight.why && (
+                                <div className="insight-detail-row">
+                                  <span className="insight-detail-label">Why:</span>
+                                  <p>{insight.why}</p>
+                                </div>
+                              )}
+                              {insight.recommendation && (
+                                <div className="insight-detail-row">
+                                  <span className="insight-detail-label">Recommendation:</span>
+                                  <p>{insight.recommendation}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -627,7 +701,7 @@ export default function AnalysisPage({ user }) {
                     })
                   }
                 >
-                  View all {insights.length} insights <ArrowRight size={14} />
+                  View all {insights.length} insights
                 </button>
               </>
             )}

@@ -59,7 +59,7 @@
 }
 
 /* ── Buttons ───────────────────────────────────────────────── */
-.btn {
+.analysis .btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -67,29 +67,33 @@
   font-size: 13px;
   font-weight: 600;
   border-radius: var(--radius-sm);
-  border: 1px solid transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   cursor: pointer;
-  transition: background var(--transition), border-color var(--transition), opacity var(--transition);
+  transition: transform var(--transition);
 }
-.btn:disabled {
+.analysis .btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.btn-primary {
+.analysis .btn-primary {
   background: var(--primary);
   color: #fff;
-}
-.btn-primary:hover:not(:disabled) {
-  filter: brightness(0.94);
-}
-.btn-secondary {
-  background: var(--background);
-  border-color: var(--border);
-  color: var(--text);
-}
-.btn-secondary:hover:not(:disabled) {
-  background: var(--surface-hover);
   border-color: var(--primary);
+}
+.analysis .btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+}
+.analysis .btn-secondary {
+  background: transparent !important;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--border) 50%, transparent) !important;
+}
+.analysis .btn-secondary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: transparent !important;
+  border-color: color-mix(in srgb, var(--border) 50%, transparent) !important;
 }
 .save-status {
   font-size: 12px;
@@ -128,6 +132,32 @@
   padding: var(--space-2) 0;
 }
 
+/* ── Snapshot Banner ─────────────────────────────────────────── */
+.snapshot-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--text-soft);
+  transition: transform var(--transition);
+}
+.snapshot-banner:hover {
+  transform: translateY(-2px);
+}
+.snapshot-banner-user {
+  color: var(--text);
+  font-weight: 500;
+}
+.snapshot-banner-engagement {
+  color: var(--text-soft);
+  margin-left: var(--space-1);
+}
+
 .banner {
   display: flex;
   align-items: flex-start;
@@ -158,14 +188,14 @@
   margin-bottom: var(--space-6);
 }
 .kpi-card {
-  background: var(--background);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
-  transition: border-color var(--transition);
+  transition: transform var(--transition);
 }
 .kpi-card:hover {
-  border-color: var(--text-soft);
+  transform: translateY(-2px);
 }
 .kpi-card h4 {
   margin: 0;
@@ -223,6 +253,16 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--space-4);
+}
+.ratio-item {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  transition: transform var(--transition);
+}
+.ratio-item:hover {
+  transform: translateY(-2px);
 }
 .ratio-item h5 {
   margin: 0 0 4px;
@@ -304,26 +344,29 @@
 }
 .chart-card {
   background: var(--background);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
-  transition: border-color var(--transition);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  transition: transform var(--transition), box-shadow var(--transition);
 }
 .chart-card:hover {
-  border-color: var(--text-soft);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
 }
 .chart-card h3 {
   margin: 0 0 var(--space-4);
   color: var(--text);
   font-size: 13.5px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 /* ── Donut + legend ────────────────────────────────────────── */
 .donut-panel {
   display: flex;
   align-items: center;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
 .donut-legend {
   flex: 1;
@@ -332,20 +375,23 @@
 .legend-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: 5px 0;
+  gap: var(--space-3);
+  padding: 7px 6px;
+  border-radius: 6px;
+  transition: background var(--transition);
 }
-.legend-row + .legend-row {
-  border-top: 1px solid var(--border);
+.legend-row:hover {
+  background: var(--surface-hover);
 }
 .legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
   flex-shrink: 0;
 }
 .legend-label {
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--text);
   flex: 1;
   overflow: hidden;
@@ -353,15 +399,18 @@
   white-space: nowrap;
 }
 .legend-pct {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 700;
   color: var(--text);
+  min-width: 34px;
+  text-align: right;
 }
 .legend-value {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-soft);
-  min-width: 64px;
+  min-width: 68px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Summary Cards ─────────────────────────────────────────── */
@@ -372,10 +421,14 @@
   margin-top: var(--space-4);
 }
 .summary-card {
-  background: var(--background);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   border-radius: var(--radius-md);
   padding: var(--space-4);
+  transition: transform var(--transition);
+}
+.summary-card:hover {
+  transform: translateY(-2px);
 }
 .summary-card h4 {
   margin: 0;
@@ -411,13 +464,13 @@
   font-size: 13px;
 }
 
-/* ── AI Insights ───────────────────────────────────────────── */
+/* ── Insights Section ───────────────────────────────────────────── */
 .insights-toolbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
+  gap: 16px;
+  margin-bottom: 16px;
 }
 .insights-toolbar h2 {
   margin: 0 0 4px;
@@ -427,39 +480,46 @@
 }
 .insights-toolbar p {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-soft);
   max-width: 46ch;
 }
 .insight-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-3);
+  gap: 12px;
 }
 .insight-card {
   background: var(--background);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  transition: border-color var(--transition), background var(--transition);
+  border-radius: 6px;
+  padding: 12px;
+  transition: all 0.2s ease;
 }
+
 .insight-card:hover {
-  border-color: var(--text-soft);
-  background: var(--surface-hover);
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.insight-card.expanded {
+  border-color: var(--accent);
+  background: var(--accent-bg);
 }
 
 .insight-card-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
+  gap: 8px;
+  padding: 0;
   cursor: pointer;
-  min-height: 150px;
+  min-height: 120px;
 }
 .insight-card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .insight-icon {
   flex-shrink: 0;
@@ -472,10 +532,17 @@
 
 .insight-tag {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: 0.05em;
   color: var(--text-soft);
+}
+
+.insight-message {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
 }
 
 .insight-message {
@@ -590,6 +657,97 @@
   border-top: 1px solid var(--border);
   margin-top: var(--space-2);
   padding-top: var(--space-3);
+}
+
+/* ── Enhanced Insights UX ─────────────────────────────────── */
+.insight-expand-btn {
+  background: none;
+  border: none;
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-left: auto;
+  transition: all 0.2s;
+}
+
+.insight-expand-btn:hover {
+  background: var(--background-hover);
+  color: var(--text);
+}
+
+.insight-details {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.insight-detail-row {
+  margin-bottom: 8px;
+}
+
+.insight-detail-row:last-child {
+  margin-bottom: 0;
+}
+
+.insight-detail-label {
+  font-weight: 600;
+  color: var(--text-soft);
+  font-size: 11px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.insight-detail-row p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* ── Professional Spacing Consistency ───────────────────────── */
+.card {
+  margin-bottom: 12px;
+}
+
+.card-header-row {
+  margin-bottom: 12px;
+}
+
+.stats-grid {
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  padding: 12px;
+}
+
+.section-header {
+  margin-bottom: 12px;
+}
+
+.chart-grid {
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+/* ── Insights Page Specific Styles ───────────────────────────── */
+.insights-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+.insight-card--full .insight-card-body {
+  cursor: default;
+  min-height: 0;
+}
+.insight-card--full .insight-detail {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
 }
 
 /* ── Chart helpers ─────────────────────────────────────────── */

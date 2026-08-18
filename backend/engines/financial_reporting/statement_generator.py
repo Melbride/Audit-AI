@@ -23,6 +23,52 @@ BALANCE_SHEET_CATEGORIES = {
     "Share Capital": "equity",
     "Retained Earnings": "equity",
 }
+
+
+def _build_balance_sheet_note(balance_sheet_difference: float, net_profit: float, unclassified_count: int) -> str | None:
+    """
+    Build a context-aware balance sheet note that matches the numbers on the page.
+    The note stays descriptive and avoids implying an error when the difference may
+    simply reflect an unclosed period result or excluded accounts.
+    """
+    if balance_sheet_difference == 0:
+        return None
+
+    direction = "higher" if balance_sheet_difference > 0 else "lower"
+    lines = [
+        f"Balance sheet check: assets are {abs(balance_sheet_difference):,.2f} {direction} than liabilities plus equity."
+    ]
+
+    if unclassified_count > 0:
+        lines.append(
+            f"{unclassified_count} account(s) were excluded because they are still unclassified in Account Mapping."
+        )
+
+    if net_profit > 0:
+        lines.append(
+            f"The income statement shows a net profit of {net_profit:,.2f}."
+        )
+        lines.append(
+            "If closing entries have not yet been posted, part of this gap may still need to be rolled into retained earnings."
+        )
+    elif net_profit < 0:
+        lines.append(
+            f"The income statement shows a net loss of {abs(net_profit):,.2f}."
+        )
+        lines.append(
+            "If closing entries have not yet been posted, part of this gap may still need to be reflected in retained earnings."
+        )
+    else:
+        lines.append(
+            "The income statement currently shows no net profit or loss to explain the gap."
+        )
+
+    lines.append(
+        "Review the income statement and account mapping together before treating this as an error."
+    )
+    return " ".join(lines)
+
+
 # Function to generate financial statements from a trial balance DataFrame and account mapping.
 def generate_financial_statements(df: pd.DataFrame, mapping: dict, account_mapping: dict) -> dict:
     """
@@ -129,16 +175,11 @@ def generate_financial_statements(df: pd.DataFrame, mapping: dict, account_mappi
             "total_liabilities": total_liabilities,
             "total_equity": total_equity,
             "difference": balance_sheet_difference,
-            "note": (
-                "Note: Total Assets do not equal Total Liabilities plus Equity "
-                f"(difference of {balance_sheet_difference:,.2f}). This Balance "
-                "Sheet does not include this period's Net Profit/Loss in "
-                "Retained Earnings. If this trial balance is a complete, "
-                "properly balanced set of accounts, this difference would "
-                "typically correspond to the period's Net Profit or Loss, "
-                "please verify against the Income Statement rather than "
-                "assuming this automatically."
-            ) if balance_sheet_difference != 0 else None,
+            "note": _build_balance_sheet_note(
+                balance_sheet_difference,
+                net_profit,
+                len(unclassified_accounts),
+            ),
         },
         "unclassified_accounts": unclassified_accounts,
         "message": (

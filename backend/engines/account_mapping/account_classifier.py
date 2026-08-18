@@ -67,7 +67,7 @@ EXAMPLE output format:
 {{"Cash at Bank": "Cash & Cash Equivalents", "Sales Revenue": "Revenue", "Mystery Account XYZ": "unknown"}}"""
         # Send the prompt to the LLM and get the response
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             # The prompt is sent as a system message to the LLM, and the user's message contains the actual prompt text. The temperature is set to 0 for deterministic output, and max_tokens is set to 2000 to allow for a large enough response.
             messages=[
                 {
@@ -191,19 +191,27 @@ def build_account_mapping_result(df: pd.DataFrame, mapping: dict, saved_account_
     freshly suggested by the LLM), sample debit/credit totals, and any
     balance-direction warnings.
     """
-    # Check if the required columns are mapped in the provided mapping dictionary. If any of the required columns ("account_name", "debit", "credit") are missing, return a result indicating that the mapping is not applicable and provide a message explaining the issue.
+    # Check if the required columns are mapped in the provided mapping dictionary. If any of the required columns are missing, return a result indicating that the mapping is not applicable and provide a message explaining the issue.
+    # Define alternative names for each target to handle different mapping conventions
+    field_alternatives = {
+        "account_name": ["account_name", "account_description"],
+        "debit": ["debit", "debit_amount"],
+        "credit": ["credit", "credit_amount"],
+    }
+    
     account_name_col = None
     debit_col = None
     credit_col = None
-    # Loop through the mapping dictionary to find the columns that correspond to "account_name", "debit", and "credit"
+    # Loop through the mapping dictionary to find the columns that correspond to account_name, debit, and credit (or their alternatives)
     for info in mapping.values():
         if isinstance(info, dict):
-            if info.get("mapped_to") == "account_name":
-                account_name_col = "account_name"
-            elif info.get("mapped_to") == "debit":
-                debit_col = "debit"
-            elif info.get("mapped_to") == "credit":
-                credit_col = "credit"
+            mapped_to = info.get("mapped_to")
+            if mapped_to in field_alternatives["account_name"]:
+                account_name_col = mapped_to  # Use the actual column name for DataFrame access
+            elif mapped_to in field_alternatives["debit"]:
+                debit_col = mapped_to  # Use the actual column name for DataFrame access
+            elif mapped_to in field_alternatives["credit"]:
+                credit_col = mapped_to  # Use the actual column name for DataFrame access
     # Check if all required columns are mapped. If any of them are missing, return a result indicating that the mapping is not applicable and provide a message explaining the issue.
     if not account_name_col or not debit_col or not credit_col:
         return {

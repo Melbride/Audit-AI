@@ -139,7 +139,7 @@ function CleanPage( ) {
         <div className="page">
             {/* <div className="header">
                 <h1 className="logo">Audit AI</h1>
-                <p className="subtitle">AI Financial Intelligence System</p>
+                <p className="subtitle">Financial Intelligence System</p>
             </div> */}
 
             <div className="card relative-card">

@@ -1,0 +1,413 @@
+/* ═══════════════════════════════════════════════════════════
+   Financial Statements Page — self-contained styles
+   (uses shared tokens from App.css: --background, --text,
+   --text-soft, --primary, --border, --surface-hover, --transition)
+   All state is communicated through weight/icon/border only —
+   no tinted card backgrounds, so nothing reads as a color-coded
+   "AI dashboard" widget. The one exception is a genuine error,
+   which keeps a red accent because that's a usability need, not
+   decoration.
+   ═══════════════════════════════════════════════════════════ */
+.fs-page {
+  --tone-danger: #c0392b;
+
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+
+  background: var(--background);
+  padding: 0 var(--space-2) var(--space-2);
+  margin: 0;
+}
+
+.fs-page .error {
+  color: var(--tone-danger);
+  font-size: 13px;
+  margin: var(--space-4) 0;
+}
+
+.fs-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* ── Cards ─────────────────────────────────────────────────── */
+.fs-page .card-clean-body,
+.fs-page .relative-card {
+  background: var(--background);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+/* ── Titles ────────────────────────────────────────────────── */
+.fs-page .title {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.fs-page .title::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--text);
+  border-radius: 2px;
+}
+.fs-hero .title { font-size: 18px; letter-spacing: -0.01em; }
+.fs-hero .title::before { display: none; }
+
+/* ── Hero ──────────────────────────────────────────────────── */
+.fs-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.fs-hero-copy { max-width: 780px; min-width: 0; }
+.fs-kicker {
+  margin: 0 0 var(--space-1);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-soft);
+}
+.fs-description,
+.fs-section-copy {
+  margin: var(--space-1) 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 760px;
+}
+
+/* ── Status badge — one neutral style, no per-state color ──── */
+.tb-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.tb-badge-success,
+.tb-badge-warning,
+.tb-badge-neutral {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+/* ── Meta grid ─────────────────────────────────────────────── */
+.fs-meta-grid,
+.tb-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.tb-meta-item {
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: transparent;
+  min-width: 0;
+}
+.tb-meta-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-soft);
+  margin-bottom: 2px;
+}
+.tb-meta-item strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Workflow stepper — plain breadcrumb line, no per-step
+   card/border/fill. State shown only by weight + a connecting
+   line, so it reads as a UI pattern, not a template widget. ── */
+.fs-flow-card {
+  padding: var(--space-3) var(--space-5) !important;
+}
+.tb-flow {
+  display: flex;
+  align-items: center;
+}
+.tb-flow-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+.tb-flow-connector {
+  flex: 1 1 auto;
+  height: 1px;
+  min-width: var(--space-6);
+  background: var(--border);
+  margin: 0 var(--space-3);
+}
+.tb-flow-number {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  color: var(--text-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.tb-flow-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+/* done: quietly resolved — thin border, muted, no fill */
+.tb-flow-step.done .tb-flow-number {
+  border-color: var(--text-soft);
+  color: var(--text-soft);
+}
+/* active: the only step that stands out, by weight alone */
+.tb-flow-step.active .tb-flow-number {
+  border-color: var(--text);
+  border-width: 2px;
+  color: var(--text);
+}
+.tb-flow-step.active .tb-flow-label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* ── Banners ───────────────────────────────────────────────── */
+.fs-banner {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  border-left: 3px solid var(--text-soft);
+  color: var(--text);
+}
+.fs-banner-loading,
+.fs-banner-warning {
+  background: transparent !important;
+  border-left-color: var(--text-soft);
+  color: var(--text);
+}
+.fs-banner-error {
+  background: color-mix(in srgb, var(--tone-danger) 8%, var(--background)) !important;
+  border-left-color: var(--tone-danger);
+  color: var(--tone-danger);
+}
+
+/* ── Sections ──────────────────────────────────────────────── */
+.fs-section-head { display: grid; gap: 2px; margin-bottom: var(--space-2); }
+.breakdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+/* ── Ratios ────────────────────────────────────────────────── */
+.ratio-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+.ratio-tile {
+  min-height: 76px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.ratio-label {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.ratio-tile strong {
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+/* ── Income statement: Revenue / Expenses side by side ───────
+   Same column layout in both tables so amounts line up. ────── */
+.fs-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+/* ── Tables ────────────────────────────────────────────────── */
+.fs-page .table-wrapper {
+  overflow-x: auto;
+  margin-top: var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+.fs-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  table-layout: fixed;
+}
+.fs-page th:nth-child(1), .fs-page td:nth-child(1) { width: 46%; }
+.fs-page th:nth-child(2), .fs-page td:nth-child(2) { width: 28%; }
+.fs-page th:nth-child(3), .fs-page td:nth-child(3) { width: 26%; }
+.fs-page th {
+  text-align: left;
+  color: var(--text-soft);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.fs-page td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-page th:last-child,
+.fs-page td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fs-page tbody tr:last-child td { border-bottom: none; }
+.fs-page tbody tr:hover { background: var(--surface-hover); }
+
+/* ── Inline notes — one neutral style, wording carries the
+   meaning ("Net Profit" vs "Net Loss") instead of color ────── */
+.fs-inline-note {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+/* ── Footer / buttons ──────────────────────────────────────── */
+.fs-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.fs-footer-copy {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.fs-page .btn {
+  height: 34px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: transform var(--transition);
+}
+.fs-page .btn-secondary {
+  background: transparent;
+  color: var(--text);
+}
+.fs-page .btn-secondary:hover {
+  transform: translateY(-2px);
+}
+.fs-page .btn-proceed {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  font-weight: 700;
+}
+.fs-page .btn-proceed:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.fs-page .btn-proceed:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── Responsive ────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .fs-page .card-clean-body,
+  .fs-page .relative-card { padding: var(--space-3) var(--space-4); }
+  .fs-hero-top,
+  .fs-footer { flex-direction: column; align-items: stretch; }
+  .fs-meta-grid,
+  .ratio-grid,
+  .fs-two-col {
+    grid-template-columns: 1fr;
+  }
+  .tb-flow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+  .tb-flow-connector {
+    display: none;
+  }
+  .tb-meta-item strong { white-space: normal; }
+}

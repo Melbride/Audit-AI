@@ -89,6 +89,16 @@ export default function WorkspacePage({ user }) {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [workspace]);
 
+  useEffect(() => {
+    if (workspace && user && user.role !== "Auditor") {
+      if (sectionSubmission?.submission_id) {
+        navigate(`/submissions/${sectionSubmission.submission_id}/review`, { replace: true });
+      } else if (workspace.engagement_id) {
+        navigate(`/engagements/${workspace.engagement_id}`, { replace: true });
+      }
+    }
+  }, [workspace, sectionSubmission, user]);
+
 
   const loadWorkspaceData = async (id) => {
     setLoading(true);
@@ -498,7 +508,8 @@ export default function WorkspacePage({ user }) {
               cleanResult,
               clientId: String(cId),
               uploadResult,
-              fileType: uploadResult.file_type
+              fileType: uploadResult.file_type,
+              workflow: fileResumeState.workflow || null
             }});
           } catch (err) {
             console.error('Failed to fetch cleaned data for TB validation:', err);
@@ -506,7 +517,8 @@ export default function WorkspacePage({ user }) {
               cleanResult: { file_id: fId, file_type: uploadResult.file_type, can_proceed: true, cleaned_data: [], validation_report: { issues: [] } },
               clientId: String(cId),
               uploadResult,
-              fileType: uploadResult.file_type
+              fileType: uploadResult.file_type,
+              workflow: fileResumeState.workflow || null
             }});
           }
           break;

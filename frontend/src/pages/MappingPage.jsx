@@ -38,6 +38,21 @@ function MappingPage() {
     // Where the mapping came from (AI / saved mapping / fingerprint cache), used for the banner
     const [detectionSource, setDetectionSource] = useState(null)
     const [detectionMessage, setDetectionMessage] = useState(null)
+    
+    // Canonical field names for controlled mapping interface
+    const CANONICAL_FIELDS = [
+        { value: 'account_name', label: 'Account Name' },
+        { value: 'debit', label: 'Debit' },
+        { value: 'credit', label: 'Credit' },
+        { value: 'date', label: 'Date' },
+        { value: 'amount', label: 'Amount' },
+        { value: 'account_code', label: 'Account Code' },
+        { value: 'unknown', label: 'Unknown / Skip' },
+        { value: 'other', label: 'Other (custom field)' }
+    ]
+    
+    // Track which columns are using custom "Other" field names
+    const [customFieldNames, setCustomFieldNames] = useState({})
 
     const FILE_TYPE_CATEGORIES = {
         fixed_assets: 'Fixed Assets Register',
@@ -116,8 +131,19 @@ function MappingPage() {
                     // Don't pass file_type initially - let backend return the saved one
                     formData.append('file_type', 'general')
                     const detectResponse = await detectColumns(formData)
+                    const mapping = detectResponse.data.mapping
+                    setMapping(mapping)
                     
-                    setMapping(detectResponse.data.mapping)
+                    // Initialize custom field names for non-canonical values
+                    const customNames = {}
+                    Object.entries(mapping).forEach(([col, info]) => {
+                        const mappedTo = info.mapped_to
+                        if (mappedTo && mappedTo !== 'unknown' && !CANONICAL_FIELDS.some(f => f.value === mappedTo)) {
+                            customNames[col] = mappedTo
+                        }
+                    })
+                    setCustomFieldNames(customNames)
+                    
                     setDetectionSource(detectResponse.data.source || null)
                     setDetectionMessage(detectResponse.data.message || null)
                 } catch (err) {
@@ -156,7 +182,19 @@ function MappingPage() {
                     formData.append('fingerprint', '')
                     formData.append('file_type', 'general')
                     const detectResponse = await detectColumns(formData)
-                    setMapping(detectResponse.data.mapping)
+                    const mapping = detectResponse.data.mapping
+                    setMapping(mapping)
+                    
+                    // Initialize custom field names for non-canonical values
+                    const customNames = {}
+                    Object.entries(mapping).forEach(([col, info]) => {
+                        const mappedTo = info.mapped_to
+                        if (mappedTo && mappedTo !== 'unknown' && !CANONICAL_FIELDS.some(f => f.value === mappedTo)) {
+                            customNames[col] = mappedTo
+                        }
+                    })
+                    setCustomFieldNames(customNames)
+                    
                     setDetectionSource(detectResponse.data.source || null)
                     setDetectionMessage(detectResponse.data.message || null)
                 } catch (err) {
@@ -182,7 +220,19 @@ function MappingPage() {
             formData.append('fingerprint', uploadResult.fingerprint || '')
             formData.append('file_type', fileType)
             const response = await detectColumns(formData)
-            setMapping(response.data.mapping)
+            const mapping = response.data.mapping
+            setMapping(mapping)
+            
+            // Initialize custom field names for non-canonical values
+            const customNames = {}
+            Object.entries(mapping).forEach(([col, info]) => {
+                const mappedTo = info.mapped_to
+                if (mappedTo && mappedTo !== 'unknown' && !CANONICAL_FIELDS.some(f => f.value === mappedTo)) {
+                    customNames[col] = mappedTo
+                }
+            })
+            setCustomFieldNames(customNames)
+            
             setDetectionSource(response.data.source || null)
             setDetectionMessage(response.data.message || null)
             if (response.data.suggested_file_type) {
@@ -204,31 +254,81 @@ function MappingPage() {
 
     // Updates a single mapping field for a column
     const handleMappingChange = (originalCol, field, value) => {
-        const normalized = field === 'mapped_to'
-            ? value.toLowerCase().trim().replace(/\s+/g, '_')
-            : value
-        setMapping(prev => ({
-            ...prev,
-            [originalCol]: { ...prev[originalCol], [field]: normalized }
-        }))
-        if (field === 'mapped_to' && value !== 'unknown') {
-            setReviewedUnknowns(prev => {
-                const next = { ...prev }
-                delete next[originalCol]
-                return next
-            })
-            if (value.trim() !== '') {
+        if (field === 'mapped_to') {
+            // Handle canonical field selection or custom field name
+            if (value === 'other') {
+                // Switch to custom field mode - keep existing value or empty
+                const currentCustom = customFieldNames[originalCol] || ''
+                setCustomFieldNames(prev => ({ ...prev, [originalCol]: currentCustom }))
+                setMapping(prev => ({
+                    ...prev,
+                    [originalCol]: { ...prev[originalCol], mapped_to: currentCustom }
+                }))
+            } else if (value === 'unknown') {
+                // Clear custom field name when switching to unknown
+                setCustomFieldNames(prev => {
+                    const next = { ...prev }
+                    delete next[originalCol]
+                    return next
+                })
+                setMapping(prev => ({
+                    ...prev,
+                    [originalCol]: { ...prev[originalCol], mapped_to: 'unknown' }
+                }))
+            } else {
+                // Canonical field selected
+                setCustomFieldNames(prev => {
+                    const next = { ...prev }
+                    delete next[originalCol]
+                    return next
+                })
+                setMapping(prev => ({
+                    ...prev,
+                    [originalCol]: { ...prev[originalCol], mapped_to: value }
+                }))
+            }
+            
+            // Auto-set field type for canonical fields
+            if (value !== 'other' && value !== 'unknown' && value.trim() !== '') {
+                const fieldTypeForCanonical = (canonical) => {
+                    if (canonical === 'date') return 'date'
+                    if (['debit', 'credit', 'amount'].includes(canonical)) return 'numeric'
+                    return 'text'
+                }
                 setMapping(prev => ({
                     ...prev,
                     [originalCol]: {
                         ...prev[originalCol],
-                        mapped_to: value,
-                        field_type: prev[originalCol].field_type === 'unknown' ? 'text' : prev[originalCol].field_type
+                        field_type: fieldTypeForCanonical(value)
                     }
                 }))
-                return
             }
+            
+            // Remove from reviewed unknowns if mapping to a real field
+            if (value !== 'unknown') {
+                setReviewedUnknowns(prev => {
+                    const next = { ...prev }
+                    delete next[originalCol]
+                    return next
+                })
+            }
+        } else {
+            // Handle other field changes (field_type, etc.)
+            setMapping(prev => ({
+                ...prev,
+                [originalCol]: { ...prev[originalCol], [field]: value }
+            }))
         }
+    }
+    
+    // Handle custom field name input for "Other" selection
+    const handleCustomFieldNameChange = (originalCol, value) => {
+        const normalized = value.toLowerCase().trim().replace(/\s+/g, '_')
+        setCustomFieldNames(prev => ({ ...prev, [originalCol]: normalized }))
+        setMapping(prev => ({
+            ...prev,
+            [originalCol]: { ...prev[originalCol], mapped_to: normalized }
+        }))
     }
 
     const handleReviewedToggle = (originalCol) => {
@@ -250,6 +350,23 @@ function MappingPage() {
 
     const fileTypeIsIncomplete = () => fileType === 'other' && customFileTypeLabel.trim() === ''
 
+    // Detect duplicate target mappings before saving
+    const getDuplicateTargets = () => {
+        if (!mapping) return []
+        const counts = {}
+        Object.entries(mapping).forEach(([col, info]) => {
+            const target = info?.mapped_to?.trim()?.toLowerCase()
+            if (target && target !== 'unknown') {
+                counts[target] = (counts[target] || 0) + 1
+            }
+        })
+        return Object.keys(counts).filter(target => counts[target] > 1)
+    }
+
+    const hasDuplicateTargets = () => {
+        return getDuplicateTargets().length > 0
+    }
+
     // Validates mapping/file type, then saves the confirmed mapping to the backend
     const handleSave = async () => {
         if (hasUnresolvedRows()) {
@@ -258,6 +375,11 @@ function MappingPage() {
         }
         if (fileTypeIsIncomplete()) {
             setError('Please type a name for this file type, or choose one of the listed categories.')
+            return
+        }
+        if (hasDuplicateTargets()) {
+            const duplicates = getDuplicateTargets()
+            setError(`Mapping conflict detected. Multiple columns are mapped to the same target field(s): ${duplicates.join(', ')}. Please ensure each target field is used by only one source column.`)
             return
         }
         const persistedMapping = buildPersistedMapping()
@@ -317,6 +439,9 @@ function MappingPage() {
         if (detectionSource === 'saved_mapping' || detectionSource === 'fingerprint_cache') {
             return "This mapping was loaded from this client's saved profile.Review, change and confirm as needed."
         }
+        if (detectionSource === 'file_specific') {
+            return "This mapping was loaded from this specific file.Review, change and confirm as needed."
+        }
         return null
     }
 
@@ -334,7 +459,7 @@ function MappingPage() {
 
             {/* <div className="header">
                 <h1 className="logo">Audit AI</h1>
-                <p className="subtitle">AI Financial Intelligence System</p>
+                <p className="subtitle">Financial Intelligence System</p>
             </div> */}
 
             <div className="card">
@@ -369,7 +494,7 @@ function MappingPage() {
 
             {detecting && (
                 <div className="card">
-                    <p className="detecting-text">Analyzing columns using AI... This may take a moment.</p>
+                    <p className="detecting-text">Analyzing columns... This may take a moment.</p>
                 </div>
             )}
 
@@ -427,7 +552,7 @@ function MappingPage() {
                         )}
 
                         <span className="file-type-hint">
-                            {detectionSource === 'saved_mapping' || detectionSource === 'fingerprint_cache'
+                            {detectionSource === 'saved_mapping' || detectionSource === 'fingerprint_cache' || detectionSource === 'file_specific'
                                 ? 'Loaded from saved profile, confirm or change'
                                 : 'AI suggested, confirm or change before saving'}
                         </span>
@@ -479,19 +604,38 @@ function MappingPage() {
                                             <td>
                                                 <span className={`fill-rate ${cls}`}>{pct}%</span>
                                             </td>
-                                            {/* Click-to-edit "Mapped To" cell */}
+                                            {/* Canonical field selection dropdown */}
                                             <td>
                                                 <div className="mapped-to-cell">
                                                     {editingCol === col ? (
-                                                        <input
-                                                            className="mapping-input"
-                                                            type="text"
-                                                            value={info.mapped_to === 'unknown' ? '' : info.mapped_to}
-                                                            autoFocus
-                                                            placeholder={info.mapped_to === 'unknown' || info.mapped_to.trim() === '' ? `e.g. ${info.suggestion || 'field_name'}` : ''}
-                                                            onBlur={() => setEditingCol(null)}
-                                                            onChange={(e) => handleMappingChange(col, 'mapped_to', e.target.value)}
-                                                        />
+                                                        <div className="mapping-dropdown-container">
+                                                            <select
+                                                                className="mapping-select"
+                                                                value={
+                                                                    customFieldNames[col] !== undefined ? 'other' :
+                                                                    CANONICAL_FIELDS.some(f => f.value === info.mapped_to) ? info.mapped_to : 'other'
+                                                                }
+                                                                onChange={(e) => handleMappingChange(col, 'mapped_to', e.target.value)}
+                                                                onBlur={() => setEditingCol(null)}
+                                                                autoFocus
+                                                            >
+                                                                {CANONICAL_FIELDS.map(field => (
+                                                                    <option key={field.value} value={field.value}>
+                                                                        {field.label}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            {customFieldNames[col] !== undefined && (
+                                                                <input
+                                                                    className="custom-field-input"
+                                                                    type="text"
+                                                                    value={customFieldNames[col]}
+                                                                    placeholder="Enter custom field name"
+                                                                    onChange={(e) => handleCustomFieldNameChange(col, e.target.value)}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                />
+                                                            )}
+                                                        </div>
                                                     ) : (
                                                         <span
                                                             className="mapped-to-text"

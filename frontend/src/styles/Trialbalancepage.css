@@ -1,0 +1,402 @@
+/* ═══════════════════════════════════════════════════════════
+   Trial Balance Page — self-contained styles
+   (uses shared tokens from App.css: --background, --text,
+   --text-soft, --primary, --border, --surface-hover, --transition)
+   Same language as AccountMappingPage.css / FinancialStatementsPage.css:
+   neutral cards, a plain breadcrumb stepper, color reserved for
+   small functional signals (a dot, a badge word) and genuine
+   errors/warnings — never a tinted card background.
+   ═══════════════════════════════════════════════════════════ */
+.tb-page {
+  --tone-danger: #c0392b;
+  --tone-warning: #b7791f;
+  --tone-success: #1f9d55;
+
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+
+  background: var(--background);
+  padding: 0 var(--space-2) var(--space-2);
+  margin: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* ── Header ────────────────────────────────────────────────── */
+.tb-page .header {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-top: var(--space-3);
+}
+.tb-page .logo {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.tb-page .subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.tb-shell {
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ── Cards ─────────────────────────────────────────────────── */
+.tb-page .card {
+  background: var(--background);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+/* ── Titles ────────────────────────────────────────────────── */
+.tb-page .title {
+  margin: 0 0 var(--space-2);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.tb-page .title::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  background: var(--text);
+  border-radius: 2px;
+}
+.tb-hero .title { font-size: 18px; letter-spacing: -0.01em; }
+.tb-hero .title::before { display: none; }
+
+.tb-page .mapping-note {
+  font-size: 13px;
+  color: var(--text-soft);
+  margin: 0;
+  line-height: 1.5;
+}
+.tb-hero-copy { max-width: 760px; margin-top: var(--space-1); }
+
+/* ── Hero ──────────────────────────────────────────────────── */
+.tb-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+/* ── Status badge — one neutral style ─────────────────────── */
+.tb-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tb-badge-success,
+.tb-badge-warning,
+.tb-badge-neutral {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.tb-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.tb-meta-item {
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: transparent;
+  min-width: 0;
+}
+.tb-meta-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-soft);
+  margin-bottom: 2px;
+}
+.tb-meta-item strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Workflow stepper — plain breadcrumb line ─────────────────
+   Same rules as AccountMappingPage.css / FinancialStatementsPage.css. */
+.tb-flow-card { padding: var(--space-3) var(--space-5) !important; }
+.tb-flow {
+  display: flex;
+  align-items: center;
+}
+.tb-flow-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+.tb-flow-connector {
+  flex: 1 1 auto;
+  height: 1px;
+  min-width: var(--space-6);
+  background: var(--border);
+  margin: 0 var(--space-3);
+}
+.tb-flow-number {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  color: var(--text-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.tb-flow-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+.tb-flow-step.done .tb-flow-number {
+  border-color: var(--text-soft);
+  color: var(--text-soft);
+}
+.tb-flow-step.active .tb-flow-number {
+  border-color: var(--text);
+  border-width: 2px;
+  color: var(--text);
+}
+.tb-flow-step.active .tb-flow-label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* ── Alerts / banners ──────────────────────────────────────── */
+.tb-alert {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  border-left: 3px solid var(--tone-danger);
+  color: var(--tone-danger);
+  background: color-mix(in srgb, var(--tone-danger) 8%, var(--background));
+}
+
+.tb-banner {
+  border-left: 3px solid var(--text-soft);
+  background: transparent;
+}
+.tb-banner-success { border-left-color: var(--text-soft); }
+.tb-banner-warning { border-left-color: var(--tone-warning); }
+.tb-banner-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.tb-banner-copy {
+  margin-top: var(--space-1);
+  font-size: 13px;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+/* ── Action row ────────────────────────────────────────────── */
+.tb-action-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.tb-status-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.tb-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tb-status-dot-success { background: var(--tone-success); }
+.tb-status-dot-warning { background: var(--tone-warning); }
+
+/* ── Stats grid ────────────────────────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+.stat-card {
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  text-align: center;
+}
+.stat-card h3 {
+  margin: 0 0 2px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+}
+.stat-card p {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ── Issue list ────────────────────────────────────────────── */
+.insights-list {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.insight-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-left: 3px solid var(--text-soft);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text);
+}
+.insight-row p { margin: 0; }
+.insight-row.insight-high { border-left-color: var(--tone-danger); }
+.insight-row.insight-medium { border-left-color: var(--tone-warning); }
+.insight-type-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-soft);
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+.insight-row.insight-high .insight-type-badge { color: var(--tone-danger); }
+.insight-row.insight-medium .insight-type-badge { color: var(--tone-warning); }
+
+.all-clean {
+  margin-top: var(--space-3);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tone-success);
+}
+
+/* ── Correction panel ──────────────────────────────────────── */
+.tb-correction-panel { display: grid; gap: var(--space-3); }
+.tb-panel-head { display: grid; gap: 2px; }
+.tb-upload-box { display: grid; gap: var(--space-3); }
+.tb-page .input {
+  height: 34px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font-size: 13px;
+}
+.tb-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* ── Proceed panel ─────────────────────────────────────────── */
+.tb-proceed-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.tb-proceed-copy { min-width: 0; }
+
+/* ── Buttons ───────────────────────────────────────────────── */
+.tb-page .btn {
+  height: 34px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  transition: transform var(--transition);
+}
+.tb-page .btn:hover:not(:disabled) { transform: translateY(-2px); }
+.tb-page .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+.tb-page .btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+  font-weight: 600;
+}
+
+/* ── Responsive ────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .tb-page .card { padding: var(--space-3) var(--space-4); }
+  .tb-hero-top,
+  .tb-action-row,
+  .tb-proceed-panel { flex-direction: column; align-items: stretch; }
+  .tb-meta-grid,
+  .stats-grid { grid-template-columns: 1fr; }
+  .tb-flow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+  .tb-flow-connector { display: none; }
+}

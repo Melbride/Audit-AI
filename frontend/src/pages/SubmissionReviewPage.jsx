@@ -1,10 +1,23 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getSubmissionReviewData, updateSubmissionStatus, createSubmission } from "../services/api";
-import "../styles/EngagementDetail.css";
+import { getSubmissionReviewData, updateSubmissionStatus, openWorkspace } from "../services/api";
+import "../styles/SubmissionReview.css";
+
+// The full review chain, in order — used to render the stage timeline.
+// "Auditor" only ever appears as a RETURN target (see FORWARD_MAP below),
+// never a forward step, but it still needs a slot in the timeline so a
+// returned submission visibly shows where it went back to.
+const CHAIN = [
+  "Accountant",
+  "Auditor",
+  "Senior Auditor",
+  "Assistant Manager",
+  "Audit Manager",
+  "Engagement Partner",
+  "Quality Reviewer",
+];
 
 // Forward always skips "Auditor" — once submitted, their work is done.
-// "Auditor" only ever reappears as a RETURN target, never a forward step.
 const FORWARD_MAP = {
   "Accountant": "Senior Auditor",
   "Senior Auditor": "Assistant Manager",
@@ -21,7 +34,12 @@ const RETURN_MAP = {
   "Quality Reviewer": "Engagement Partner",
 };
 
-const fmt = (n) => n == null ? "—" : new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 }).format(n);
+const fmt = (n) =>
+  n == null
+    ? "—"
+    : new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 }).format(n);
+
+const statusClass = (status) => (status || "draft").toLowerCase().replace(/\s+/g, "-");
 
 export default function SubmissionReviewPage({ user }) {
   const { submissionId } = useParams();
@@ -31,6 +49,7 @@ export default function SubmissionReviewPage({ user }) {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [note, setNote] = useState("");
+  const [goingToWorkspace, setGoingToWorkspace] = useState(false);
 
   useEffect(() => {
     load();
@@ -67,8 +86,31 @@ export default function SubmissionReviewPage({ user }) {
     }
   };
 
-  if (loading) return <p className="loading-message">Loading submission...</p>;
-  if (!data?.submission) return <p className="error-message">Submission not found.</p>;
+  // Auditor-only shortcut back into their Workspace once a submission has
+  // been returned for corrections — resolves the same workspace they'd land
+  // on via their notification, just reachable directly from this page too.
+  const handleGoToWorkspace = async () => {
+    if (!user || !data?.file || !data?.submission) return;
+    setGoingToWorkspace(true);
+    try {
+      const res = await openWorkspace({
+        user_id: user.user_id,
+        client_id: data.submission.client_id,
+        file_id: data.file.file_id,
+      });
+      const ws = res.data || res;
+      if (ws?.workspace_id) {
+        navigate(`/workspace/${ws.workspace_id}`);
+      }
+    } catch (err) {
+      console.error("Failed to open workspace", err);
+    } finally {
+      setGoingToWorkspace(false);
+    }
+  };
+
+  if (loading) return <div className="sr-loading">Loading submission…</div>;
+  if (!data?.submission) return <div className="sr-error">Submission not found.</div>;
 
   const { submission, file, cleaning_summary, trial_balance_validation, account_mapping, saved_analysis } = data;
   const isTB = file?.file_type === "trial_balance" || file?.file_type === "general_ledger";
@@ -79,123 +121,261 @@ export default function SubmissionReviewPage({ user }) {
   const nextStage = FORWARD_MAP[stage] || null;
   const prevStage = RETURN_MAP[stage] || null;
   const isLastStage = stage === "Quality Reviewer";
-  const isAuditorStage = stage === "Auditor"; // returned for corrections — not a forward/return step, they must fix + resubmit via their workspace
+  const isAuditorStage = stage === "Auditor";
   const canAct = role === stage && status !== "Approved" && status !== "Cancelled";
   const isTerminal = status === "Approved" || status === "Cancelled";
+  const wasReturned = status === "Changes Requested";
+
+  // Timeline position: everything up to (not including) the current stage
+  // is "done"; the current stage is highlighted; a returned submission
+  // marks the stage it landed on as "returned" instead of "current".
+  const currentIndex = CHAIN.indexOf(stage);
 
   return (
-    <div className="engagement-detail">
-      <button className="back-button" onClick={() => navigate(`/engagements/${submission.engagement_id}`)}>
+    <div className="sr-page">
+      <button className="sr-back-btn" onClick={() => navigate(`/engagements/${submission.engagement_id}`)}>
         Back to Engagement
       </button>
 
-      <div className="engagement-header">
-        <h1>{submission.section_name} — {submission.engagement_name}</h1>
-        <p>
-          File: {file?.filename || "—"} · Status: {status}
-          {!isTerminal && ` · Currently with: ${stage}`}
-        </p>
+      {/* Header */}
+      <div className="sr-header">
+        <div className="sr-header-titles">
+          <h1>{submission.section_name} — {submission.engagement_name}</h1>
+          <p className="sr-header-meta">
+            <span className="sr-filename">{file?.filename || "No file"}</span>
+            {submission.submitted_by_name && ` · Submitted by ${submission.submitted_by_name}`}
+          </p>
+        </div>
+        <div className="sr-status-block">
+          <span className={`sr-status-badge status-${statusClass(status)}`}>{status}</span>
+          {!isTerminal && (
+            <span className="sr-currently-with">
+              Currently with <strong>{stage}</strong>
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* File & Cleaning Summary */}
-      <div className="sections-card" style={{ padding: "16px", marginBottom: "16px" }}>
-        <h3>Cleaning Summary</h3>
-        {cleaning_summary ? (
-          <p>
-            {cleaning_summary.can_proceed ? "All issues resolved" : "Unresolved issues remain"} —{" "}
-            {cleaning_summary.clean_rows} clean rows, {cleaning_summary.flagged_rows} flagged rows,{" "}
-            {cleaning_summary.total_issues} total issue(s)
-          </p>
-        ) : <p>No cleaning data available.</p>}
+      {/* Stage timeline */}
+      <div className="sr-timeline">
+        {CHAIN.map((s, i) => {
+          const isDone = !isTerminal ? i < currentIndex : true;
+          const isCurrent = !isTerminal && i === currentIndex;
+          const isReturnedTo = wasReturned && s === stage;
+          return (
+            <div className="sr-timeline-step" key={s}>
+              {i > 0 && <div className="sr-timeline-connector" />}
+              <div
+                className={`sr-timeline-dot ${
+                  isReturnedTo ? "returned" : isCurrent ? "current" : isDone ? "done" : ""
+                }`}
+              >
+                {isDone && !isReturnedTo && !isCurrent ? "✓" : i + 1}
+              </div>
+              <span className={`sr-timeline-label ${isCurrent || isReturnedTo ? "current" : isDone ? "done" : ""}`}>
+                {s}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Return notice — shown to everyone, but the fix-it shortcut only to the Auditor */}
+      {wasReturned && (
+        <div className="sr-return-notice">
+          <div className="sr-return-notice-head">
+            <span>⚠️</span>
+            <h3>Changes Requested</h3>
+          </div>
+          {submission.notes && <p className="sr-return-note-text">"{submission.notes}"</p>}
+          {role === "Auditor" ? (
+            <>
+              <p className="sr-return-helper">
+                This submission was sent back for corrections. Head to your workspace to make the required changes and resubmit.
+              </p>
+              <button className="sr-btn sr-btn-workspace" onClick={handleGoToWorkspace} disabled={goingToWorkspace}>
+                {goingToWorkspace ? "Opening…" : "Go to Workspace →"}
+              </button>
+            </>
+          ) : (
+            <p className="sr-return-helper">Waiting on the Auditor to address this and resubmit.</p>
+          )}
+        </div>
+      )}
+
+      {/* Cleaning Summary */}
+      <div className="sr-card">
+        <div className="sr-card-header">
+          <p className="sr-card-title">Cleaning Summary</p>
+        </div>
+        <div className="sr-card-body">
+          {cleaning_summary ? (
+            <>
+              <div className={`sr-result-banner ${cleaning_summary.can_proceed ? "ok" : "warn"}`}>
+                {cleaning_summary.can_proceed ? "✓ All issues resolved" : "⚠ Unresolved issues remain"}
+              </div>
+              <div className="sr-stat-row">
+                <div className="sr-stat">
+                  <span className="sr-stat-value">{cleaning_summary.clean_rows}</span>
+                  <span className="sr-stat-label">Clean rows</span>
+                </div>
+                <div className="sr-stat">
+                  <span className="sr-stat-value">{cleaning_summary.flagged_rows}</span>
+                  <span className="sr-stat-label">Flagged rows</span>
+                </div>
+                <div className="sr-stat">
+                  <span className="sr-stat-value">{cleaning_summary.total_issues}</span>
+                  <span className="sr-stat-label">Total issues</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <span className="sr-card-empty">No cleaning data available.</span>
+          )}
+        </div>
       </div>
 
       {/* Trial Balance Validation */}
       {isTB && (
-        <div className="sections-card" style={{ padding: "16px", marginBottom: "16px" }}>
-          <h3>Trial Balance Validation</h3>
-          {trial_balance_validation?.applicable ? (
-            <p>
-              {trial_balance_validation.is_balanced
-                ? "Trial balance is balanced"
-                : `Difference of ${fmt(Math.abs(trial_balance_validation.difference))}`}
-              {" — "}Debits: {fmt(trial_balance_validation.total_debits)}, Credits: {fmt(trial_balance_validation.total_credits)}
-            </p>
-          ) : <p>Not yet available.</p>}
+        <div className="sr-card">
+          <div className="sr-card-header">
+            <p className="sr-card-title">Trial Balance Validation</p>
+          </div>
+          <div className="sr-card-body">
+            {trial_balance_validation?.applicable ? (
+              <>
+                <div className={`sr-result-banner ${trial_balance_validation.is_balanced ? "ok" : "warn"}`}>
+                  {trial_balance_validation.is_balanced
+                    ? "✓ Trial balance is balanced"
+                    : `⚠ Difference of ${fmt(Math.abs(trial_balance_validation.difference))}`}
+                </div>
+                <div className="sr-stat-row">
+                  <div className="sr-stat">
+                    <span className="sr-stat-value">{fmt(trial_balance_validation.total_debits)}</span>
+                    <span className="sr-stat-label">Total debits</span>
+                  </div>
+                  <div className="sr-stat">
+                    <span className="sr-stat-value">{fmt(trial_balance_validation.total_credits)}</span>
+                    <span className="sr-stat-label">Total credits</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <span className="sr-card-empty">Not yet available.</span>
+            )}
+          </div>
         </div>
       )}
 
       {/* Account Mapping */}
-      {isTB && account_mapping && (
-        <div className="sections-card" style={{ padding: "16px", marginBottom: "16px" }}>
-          <h3>Account Mapping</h3>
-          <p>{Object.keys(account_mapping).length} account(s) classified.</p>
+      {isTB && (
+        <div className="sr-card">
+          <div className="sr-card-header">
+            <p className="sr-card-title">Account Mapping</p>
+          </div>
+          <div className="sr-card-body">
+            {account_mapping ? (
+              <div className="sr-stat-row">
+                <div className="sr-stat">
+                  <span className="sr-stat-value">{Object.keys(account_mapping).length}</span>
+                  <span className="sr-stat-label">Accounts classified</span>
+                </div>
+              </div>
+            ) : (
+              <span className="sr-card-empty">Not yet available.</span>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Financial Statements + Analysis (from saved snapshot) */}
-      <div className="sections-card" style={{ padding: "16px", marginBottom: "16px" }}>
-        <h3>{isTB ? "Financial Statements & Analysis" : "Financial Analysis"}</h3>
-        {saved_analysis ? (
-          <>
-            <p style={{ fontSize: "12px", color: "#888" }}>
-              Saved by {saved_analysis.saved_by_name || "—"} on{" "}
-              {new Date(saved_analysis.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-            </p>
-            <button
-              className="action-btn secondary"
-              onClick={() => navigate("/analysis", { state: { savedAnalysis: saved_analysis, isViewMode: true } })}
-            >
-              View Full Analysis 
-            </button>
-          </>
-        ) : <p>No saved analysis yet for this file.</p>}
+      {/* Financial Statements + Analysis */}
+      <div className="sr-card">
+        <div className="sr-card-header">
+          <p className="sr-card-title">{isTB ? "Financial Statements & Analysis" : "Financial Analysis"}</p>
+        </div>
+        <div className="sr-card-body">
+          {saved_analysis ? (
+            <>
+              <p className="sr-analysis-meta">
+                Saved by {saved_analysis.saved_by_name || "—"} on{" "}
+                {new Date(saved_analysis.created_at).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </p>
+              <button
+                className="sr-btn sr-btn-forward"
+                onClick={() => navigate("/analysis", { state: { savedAnalysis: saved_analysis, isViewMode: true } })}
+              >
+                View Full Analysis →
+              </button>
+            </>
+          ) : (
+            <span className="sr-card-empty">No saved analysis yet for this file.</span>
+          )}
+        </div>
       </div>
 
-      {/* Actions */}
-      <div className="sections-card" style={{ padding: "16px" }}>
-        <h3>Review Actions</h3>
-        {status === "Approved" && <p className="workflow-approved">Approved</p>}
-        {status === "Cancelled" && <p className="workflow-cancelled">Cancelled</p>}
-        {!isTerminal && isAuditorStage && (
-          <p className="workflow-text">
-            This submission was returned for corrections. Please fix the issue in your Workspace and resubmit.
-          </p>
+      {/* Review Actions */}
+      <div className="sr-card">
+        <div className="sr-card-header">
+          <p className="sr-card-title">Review Actions</p>
+        </div>
+
+        {status === "Approved" && <div className="sr-terminal-banner approved">✓ Approved</div>}
+        {status === "Cancelled" && <div className="sr-terminal-banner cancelled">✕ Cancelled</div>}
+
+        {!isTerminal && isAuditorStage && role !== "Auditor" && (
+          <div className="sr-waiting">
+            <span className="sr-waiting-dot" />
+            Waiting on the Auditor to resubmit.
+          </div>
         )}
+
         {!isTerminal && !isAuditorStage && !canAct && (
-          <p className="workflow-text">Waiting on {stage}</p>
+          <div className="sr-waiting">
+            <span className="sr-waiting-dot" />
+            Waiting on {stage}
+          </div>
         )}
+
         {canAct && !isAuditorStage && (
-          <div className="workflow-actions">
-            <div className="workflow-buttons">
+          <>
+            <div className="sr-actions-row">
               {isLastStage ? (
-                <button className="action-btn success" disabled={acting} onClick={() => handleAction("Approved", null)}>
-                  {acting ? "Approving..." : "Approve"}
+                <button className="sr-btn sr-btn-approve" disabled={acting} onClick={() => handleAction("Approved", null)}>
+                  {acting ? "Approving…" : "Approve"}
                 </button>
               ) : (
-                <button className="action-btn secondary" disabled={acting} onClick={() => handleAction("Under Review", nextStage)}>
-                  {acting ? "Forwarding..." : `Forward to ${nextStage}`}
+                <button className="sr-btn sr-btn-forward" disabled={acting} onClick={() => handleAction("Under Review", nextStage)}>
+                  {acting ? "Forwarding…" : `Forward to ${nextStage}`}
                 </button>
               )}
               {prevStage && (
-                <button className="action-btn warning" disabled={acting} onClick={() => handleAction("Changes Requested", prevStage)}>
+                <button className="sr-btn sr-btn-return" disabled={acting} onClick={() => handleAction("Changes Requested", prevStage)}>
                   Return to {prevStage}
                 </button>
               )}
-              <button className="action-btn danger" disabled={acting} onClick={() => handleAction("Cancelled", null)}>
+              <button className="sr-btn sr-btn-cancel" disabled={acting} onClick={() => handleAction("Cancelled", null)}>
                 Cancel
               </button>
             </div>
             <input
-              className="note-input"
+              className="sr-note-input"
               type="text"
               placeholder="Add a note (optional)"
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
-          </div>
+          </>
         )}
+
         {submission.notes && (
-          <div className="status-note" style={{ marginTop: "8px" }}>"{submission.notes}"</div>
+          <div className="sr-prior-note">
+            Latest note
+            <div className="sr-prior-note-text">"{submission.notes}"</div>
+          </div>
         )}
       </div>
     </div>

@@ -166,6 +166,35 @@
     min-width: 140px;
 }
 
+.mapping-dropdown-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 160px;
+}
+
+.mapping-dropdown-container .mapping-select {
+    width: 100%;
+    min-width: 160px;
+}
+
+.custom-field-input {
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--surface);
+    outline: none;
+    width: 100%;
+    min-width: 160px;
+}
+
+.custom-field-input:focus {
+    border-color: var(--primary);
+}
+
 .mapped-to-text {
     font-size: 13px;
     color: var(--text);
@@ -344,4 +373,190 @@ table td:nth-child(4) { max-width: 220px; }
     border: none;
     border-radius: 6px;
     font-size: 13px;
+}
+
+.mapping-shell {
+    max-width: 1180px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.mapping-hero {
+    display: grid;
+    gap: 16px;
+}
+
+.mapping-hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.mapping-hero-copy {
+    max-width: 760px;
+    line-height: 1.45;
+    margin-top: 6px;
+}
+
+.mapping-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.mapping-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.mapping-meta-item {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--surface);
+    min-width: 0;
+}
+
+.mapping-meta-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-soft);
+    margin-bottom: 6px;
+}
+
+.mapping-meta-item strong {
+    display: block;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mapping-choice-stack {
+    display: grid;
+    gap: 6px;
+}
+
+.mapping-custom-wrap {
+    display: grid;
+    gap: 4px;
+}
+
+.mapping-custom-input {
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12.5px;
+    outline: none;
+}
+
+.mapping-custom-input:focus {
+    border-color: var(--primary);
+}
+
+.mapping-custom-hint {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.3;
+}
+
+.mapping-flow-card {
+    padding-top: 14px !important;
+}
+
+.mapping-flow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.mapping-flow-step {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.mapping-flow-step.active {
+    border-color: rgba(37, 99, 235, 0.35);
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--text);
+}
+
+.mapping-flow-step.done {
+    border-color: rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.08);
+    color: var(--text);
+}
+
+.mapping-alert {
+    max-width: 1180px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.mapping-alert-info {
+    border-left: 4px solid var(--warning);
+    background: rgba(245, 158, 11, 0.08) !important;
+    color: #b45309;
+    font-weight: 600;
+}
+
+.mapping-body {
+    display: grid;
+    gap: 14px;
+}
+
+.mapping-footer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 0;
+    flex-wrap: wrap;
+}
+
+.mapping-save-stack {
+    display: grid;
+    gap: 12px;
+    justify-items: end;
+}
+
+@media (max-width: 768px) {
+    .mapping-hero-top,
+    .mapping-footer-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mapping-meta-grid,
+    .mapping-flow {
+        grid-template-columns: 1fr;
+    }
+    .mapping-meta-item strong {
+        white-space: normal;
+    }
+    .mapping-save-stack {
+        justify-items: stretch;
+    }
 }

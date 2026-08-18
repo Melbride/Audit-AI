@@ -4,6 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { getEngagements, getClients, getUsers, createEngagement, addTeamMember } from "../services/api";
 import "../styles/Engagements.css";
 
+// Sections an auditor can choose from when scoping a new engagement
+const AVAILABLE_SECTIONS = ["Revenue", "Expenses", "Inventory", "Cash & Bank"];
+
 // Engagements page: lists all audit engagements and allows authorized users
 // to create a new engagement along with assigning a workflow review team.
 export default function Engagements({ user }) {
@@ -21,15 +24,12 @@ export default function Engagements({ user }) {
 
   const [form, setForm] = useState({
     client_id: "", engagement_name: "", financial_year: "", status: "Planning",
-    start_date: "", end_date: "", accountant_id: "", auditor_id: "",
+    start_date: "", end_date: "", sections: [], accountant_id: "", auditor_id: "",
     senior_auditor_id: "", assistant_manager_id: "", audit_manager_id: "",
     engagement_partner_id: "", quality_reviewer_id: "",
   });
 
   const canCreate = user.role === "Admin" || user.role === "Senior Auditor";
-
-  // Today's date in YYYY-MM-DD format — used as the minimum for start date
-  const today = new Date().toISOString().split("T")[0];
 
   const loadData = async () => {
     setLoading(true);
@@ -69,7 +69,7 @@ export default function Engagements({ user }) {
     if (!canCreate) return;
     setForm({
       client_id: "", engagement_name: "", financial_year: "", status: "Planning",
-      start_date: "", end_date: "", accountant_id: "", auditor_id: "",
+      start_date: "", end_date: "", sections: [], accountant_id: "", auditor_id: "",
       senior_auditor_id: "", assistant_manager_id: "", audit_manager_id: "",
       engagement_partner_id: "", quality_reviewer_id: "",
     });
@@ -77,13 +77,22 @@ export default function Engagements({ user }) {
     setShowModal(true);
   };
 
-  // When start date changes, clear end date if it's now invalid
+  // Clear end date if it's now before the newly picked start date
   const handleStartDateChange = (value) => {
     setForm((prev) => ({
       ...prev,
       start_date: value,
-      // Clear end date if it's before the new start date
       end_date: prev.end_date && prev.end_date < value ? "" : prev.end_date,
+    }));
+  };
+
+  // Toggle a section in/out of the selected scope
+  const toggleSection = (section) => {
+    setForm((prev) => ({
+      ...prev,
+      sections: prev.sections.includes(section)
+        ? prev.sections.filter((s) => s !== section)
+        : [...prev.sections, section],
     }));
   };
 
@@ -92,6 +101,11 @@ export default function Engagements({ user }) {
     if (!canCreate) return;
     setSaving(true);
     setError("");
+    if (form.sections.length === 0) {
+      setError("Select at least one audit section.");
+      setSaving(false);
+      return;
+    }
     try {
       const payload = {
         client_id: Number(form.client_id),
@@ -100,6 +114,7 @@ export default function Engagements({ user }) {
         status: form.status,
         start_date: form.start_date || null,
         end_date: form.end_date || null,
+        sections: form.sections,
       };
       const res = await createEngagement(payload);
       if (res.data?.detail) { setError(res.data.detail); setSaving(false); return; }
@@ -129,7 +144,7 @@ export default function Engagements({ user }) {
       setShowModal(false);
       loadData();
     } catch (err) {
-      setError("Could not create engagement. Check your connection.");
+      setError(err.response?.data?.detail || "Could not create engagement. Check your connection.");
     }
     setSaving(false);
   };
@@ -219,7 +234,7 @@ export default function Engagements({ user }) {
                 </div>
                 <div className="eng-detail-row">
                   <span className="eng-detail-label">Status</span>
-                  <span>{selectedEngagement.status || "Unknown"}</span>
+                  <span>{selectedEngagement.display_status || selectedEngagement.status || "Unknown"}</span>
                 </div>
                 <div className="eng-detail-row">
                   <span className="eng-detail-label">Start Date</span>
@@ -268,23 +283,32 @@ export default function Engagements({ user }) {
                 onChange={(e) => setForm({ ...form, financial_year: e.target.value })}
                 placeholder="e.g. 2025" />
 
-              {/* Start date — minimum is today, no past dates allowed */}
+              <label className="eng-label">Audit Sections</label>
+              {AVAILABLE_SECTIONS.map((section) => (
+                <label key={section} style={{ display: "block", fontWeight: 400 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.sections.includes(section)}
+                    onChange={() => toggleSection(section)}
+                  />
+                  {" "}{section}
+                </label>
+              ))}
+
               <label className="eng-label">Start Date</label>
               <input
                 className="eng-input"
                 type="date"
                 value={form.start_date}
-                min={today}
                 onChange={(e) => handleStartDateChange(e.target.value)}
               />
 
-              {/* End date — minimum is the selected start date, or today if none selected */}
               <label className="eng-label">End Date</label>
               <input
                 className="eng-input"
                 type="date"
                 value={form.end_date}
-                min={form.start_date || today}
+                min={form.start_date || undefined}
                 onChange={(e) => setForm({ ...form, end_date: e.target.value })}
                 disabled={!form.start_date}
                 title={!form.start_date ? "Please select a start date first" : ""}

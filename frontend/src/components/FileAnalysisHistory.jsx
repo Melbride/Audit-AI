@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSavedAnalysesForFile, deleteSavedAnalysis } from "../services/api";
-import { FileText, Calendar, TrendingUp, Trash2 } from "lucide-react";
+import { X } from "lucide-react";
+import "../styles/FileAnalysisHistory.css";
 
 export default function FileAnalysisHistory({ engagementId, fileId, user }) {
   const navigate = useNavigate();
@@ -47,35 +48,29 @@ export default function FileAnalysisHistory({ engagementId, fileId, user }) {
     return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   };
 
-  if (loading) return <p>Loading analysis history...</p>;
+  if (loading) return <p className="fah-loading">Loading analysis history…</p>;
 
   if (analyses.length === 0) {
-    return <p className="empty-message">No saved analyses yet for this file.</p>;
+    return <p className="fah-empty">No saved analyses yet for this file.</p>;
   }
 
   return (
-    <div className="file-analysis-history-list">
+    <div className="fah-list">
       {analyses.map((analysis) => (
-        <div key={analysis.analysis_id} className="file-card" onClick={() => handleView(analysis)}>
-          <div className="file-icon">
-            <FileText size={20} />
+        <div key={analysis.analysis_id} className="fah-row" onClick={() => handleView(analysis)}>
+          <div className="fah-row-main">
+            <span className="fah-row-title">{analysis.file_type || "General"} analysis</span>
+            <span className="fah-row-meta">
+              <span className="fah-row-date">{formatDate(analysis.created_at)}</span>
+              {analysis.saved_by_name && <span>saved by {analysis.saved_by_name}</span>}
+            </span>
           </div>
-          <div className="file-info">
-            <h4>{analysis.file_type || "General"} Analysis</h4>
-            <div className="file-meta">
-              <span className="meta-item">
-                <Calendar size={14} />
-                {formatDate(analysis.created_at)}
-              </span>
-              {analysis.saved_by_name && <span className="meta-item">by {analysis.saved_by_name}</span>}
-            </div>
-          </div>
-          <div className="file-actions">
-            <button className="analyze-btn" onClick={(e) => { e.stopPropagation(); handleView(analysis); }}>
-              <TrendingUp size={16} /> View
+          <div className="fah-row-actions">
+            <button className="fah-view-link" onClick={(e) => { e.stopPropagation(); handleView(analysis); }}>
+              View 
             </button>
-            <button className="delete-btn" onClick={(e) => handleDelete(analysis.analysis_id, e)}>
-              <Trash2 size={16} />
+            <button className="fah-delete-btn" onClick={(e) => handleDelete(analysis.analysis_id, e)} title="Delete">
+              <X size={14} />
             </button>
           </div>
         </div>

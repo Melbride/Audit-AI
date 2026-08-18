@@ -1,0 +1,104 @@
+/* ============================================================
+   File Analysis History — compact revision log
+   Self-contained (fah- prefix) so this looks the same whether
+   it's embedded in EngagementDetail or the Workspace tab.
+   ============================================================ */
+
+.fah-list {
+  --ink: #1c1c1a;
+  --ink-soft: #6b6b63;
+  --ink-faint: #a3a199;
+  --rule: #e4e2dc;
+  --accent: #2b3a55;
+  --brick: #7a2e2e;
+
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.fah-empty,
+.fah-loading {
+  font-size: 13px;
+  color: var(--ink-faint);
+  padding: 10px 0;
+}
+
+.fah-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.fah-row:first-child {
+  border-top: 1px solid var(--rule);
+}
+
+.fah-row:hover .fah-view-link {
+  text-decoration-color: var(--ink);
+}
+
+.fah-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fah-row-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.fah-row-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.fah-row-date {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.fah-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.fah-view-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s ease;
+}
+
+.fah-view-link:hover { text-decoration-color: var(--accent); }
+
+.fah-delete-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s ease;
+}
+
+.fah-delete-btn:hover { color: var(--brick); }

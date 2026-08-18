@@ -89,7 +89,7 @@ Example output format:
   "unnamed: 15": {{"mapped_to": "unknown", "field_type": "unknown", "suggestion": "payment_status"}}
 }}"""
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[
             {
                 "role": "system",

@@ -1,16 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { completeWorkflowStep } from '../services/api'
-import '../styles/CleanPage.css'
-import '../styles/MappingPage.css'
+import '../styles/AccountMappingPage.css'
 
 const API_BASE = 'http://localhost:8000'
+const CUSTOM_CATEGORY_VALUE = '__custom__'
 
 function AccountMappingPage() {
     const location = useLocation()
     const navigate = useNavigate()
     const { cleanResult, clientId, uploadResult, fileType } = location.state || {}
+
+    const fileId = cleanResult?.file_id || uploadResult?.file_id
+    const effectiveCleanResult = cleanResult || (fileId ? { file_id: fileId } : null)
+    const effectiveFileType = fileType || uploadResult?.file_type || 'trial_balance'
 
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
@@ -21,7 +25,11 @@ function AccountMappingPage() {
     const [saved, setSaved] = useState(false)
     const [acknowledgedWarnings, setAcknowledgedWarnings] = useState({})
 
-    const fileId = cleanResult?.file_id || uploadResult?.file_id
+    const workflowSteps = [
+        { id: 'trial-balance', label: 'Trial Balance', status: 'done' },
+        { id: 'account-mapping', label: 'Account Mapping', status: 'active' },
+        { id: 'financial-statements', label: 'Financial Statements', status: '' },
+    ]
 
     useEffect(() => {
         if (!fileId) return
@@ -32,17 +40,28 @@ function AccountMappingPage() {
                 const formData = new FormData()
                 formData.append('file_id', fileId)
                 formData.append('client_id', clientId)
-                formData.append('file_type', fileType || 'general')
+                formData.append('file_type', effectiveFileType)
                 const response = await axios.post(`${API_BASE}/detect-account-mapping`, formData)
                 const result = response.data.account_mapping
                 if (!result.applicable) {
                     setError(result.message)
                 } else {
                     setCategories(result.categories)
-                    setAccounts(result.accounts)
+                    const normalizedAccounts = result.accounts.map((acc) => {
+                        const isKnownCategory = result.categories.includes(acc.suggested_category)
+                        const hasCustomValue = acc.suggested_category && acc.suggested_category !== 'unknown' && !isKnownCategory
+                        return {
+                            ...acc,
+                            category_mode: hasCustomValue ? 'custom' : 'preset',
+                            original_suggested_category: hasCustomValue ? acc.suggested_category : '',
+                            suggested_category: hasCustomValue ? '' : acc.suggested_category,
+                            custom_category: '',
+                        }
+                    })
+                    setAccounts(normalizedAccounts)
                     setNearDuplicates(result.near_duplicate_accounts || [])
                     const preAcknowledged = {}
-                    result.accounts.forEach(acc => {
+                    normalizedAccounts.forEach(acc => {
                         if (acc.warning_acknowledged) preAcknowledged[acc.account_name] = true
                     })
                     setAcknowledgedWarnings(preAcknowledged)
@@ -54,13 +73,13 @@ function AccountMappingPage() {
             }
         }
         load()
-    }, [fileId])
+    }, [fileId, clientId, effectiveFileType])
 
-    if (!cleanResult || !uploadResult) {
+    if (!uploadResult || !fileId) {
         return (
-            <div className="page">
-                <p className="error">No cleaned data found. Please go back and complete cleaning first.</p>
-                <button className="btn" onClick={() => navigate('/')}>Go Back</button>
+            <div className="page mapping-page">
+                <p className="error">No file data found. Please return to the previous step and continue from there.</p>
+                <button className="btn btn-secondary" onClick={() => navigate('/')}>Go Back</button>
             </div>
         )
     }
@@ -68,10 +87,27 @@ function AccountMappingPage() {
     const handleCategoryChange = (accountName, newCategory) => {
         setAccounts(prev => prev.map(acc =>
             acc.account_name === accountName
-                ? { ...acc, suggested_category: newCategory }
+                ? {
+                    ...acc,
+                    category_mode: newCategory === CUSTOM_CATEGORY_VALUE ? 'custom' : 'preset',
+                    suggested_category: newCategory === CUSTOM_CATEGORY_VALUE ? '' : newCategory,
+                    custom_category: newCategory === CUSTOM_CATEGORY_VALUE ? '' : '',
+                }
                 : acc
         ))
-        // Clear acknowledgment if category changes, warning needs re-evaluation
+        setAcknowledgedWarnings(prev => {
+            const next = { ...prev }
+            delete next[accountName]
+            return next
+        })
+    }
+
+    const handleCustomCategoryChange = (accountName, value) => {
+        setAccounts(prev => prev.map(acc =>
+            acc.account_name === accountName
+                ? { ...acc, category_mode: 'custom', custom_category: value, suggested_category: value }
+                : acc
+        ))
         setAcknowledgedWarnings(prev => {
             const next = { ...prev }
             delete next[accountName]
@@ -84,10 +120,17 @@ function AccountMappingPage() {
     }
 
     const isUnresolved = (acc) => {
+        if (acc.category_mode === 'custom') {
+            return !acc.custom_category || acc.custom_category.trim() === ''
+        }
         return !acc.suggested_category || acc.suggested_category === 'unknown' || acc.suggested_category.trim() === ''
     }
 
     const unresolvedCount = accounts.filter(isUnresolved).length
+
+    const unusualCount = accounts.filter(acc => 
+        !!acc.warning && !acknowledgedWarnings[acc.account_name] && !acc.warning_acknowledged
+    ).length
 
     const handleSave = async () => {
         setSaving(true)
@@ -95,12 +138,12 @@ function AccountMappingPage() {
         try {
             const payload = accounts.map(acc => ({
                 account_name: acc.account_name,
-                category: acc.suggested_category,
+                category: acc.category_mode === 'custom' ? acc.custom_category.trim() : acc.suggested_category,
                 warning_acknowledged: !!acknowledgedWarnings[acc.account_name],
             }))
             const formData = new FormData()
             formData.append('client_id', clientId)
-            formData.append('file_type', fileType || 'general')
+            formData.append('file_type', effectiveFileType)
             formData.append('accounts', JSON.stringify(payload))
             formData.append('confirmed_by', 'Auditor')
             await axios.post(`${API_BASE}/save-account-mapping`, formData)
@@ -113,29 +156,62 @@ function AccountMappingPage() {
     }
 
     return (
-        <div className="page">
-            <div className="header">
+        <div className="page mapping-page">
+            {/* <div className="header">
                 <h1 className="logo">Audit AI</h1>
-                <p className="subtitle">AI Financial Intelligence System</p>
+                <p className="subtitle">Financial Intelligence System</p>
+            </div> */}
+
+            <div className="card mapping-shell mapping-hero">
+                <div className="mapping-hero-top">
+                    <div>
+                        <h2 className="title">Account Mapping</h2>
+                        <p className="mapping-note mapping-hero-copy">
+                            Confirm the suggested categories before moving from the TB into Financial Statements.
+                        </p>
+                    </div>
+                    <div className="mapping-badge">
+                        {loading ? 'Classifying' : saved ? 'Saved' : 'Ready for review'}
+                    </div>
+                </div>
+
+                <div className="mapping-meta-grid">
+                    <div className="mapping-meta-item">
+                        <span className="mapping-meta-label">File</span>
+                        <strong title={uploadResult.filename}>{uploadResult.filename}</strong>
+                    </div>
+                    <div className="mapping-meta-item">
+                        <span className="mapping-meta-label">Client</span>
+                        <strong title={String(clientId)}>{clientId}</strong>
+                    </div>
+                    <div className="mapping-meta-item">
+                        <span className="mapping-meta-label">Source</span>
+                        <strong>{cleanResult ? 'Cleaned TB' : 'Corrected TB handoff'}</strong>
+                    </div>
+                </div>
             </div>
 
-            <div className="card">
-                <h2 className="title">Account Mapping</h2>
-                <div className="info-row">
-                    <span className="info-label">File:</span>
-                    <span>{uploadResult.filename}</span>
+            <div className="card mapping-shell mapping-flow-card">
+                <div className="mapping-flow">
+                    {workflowSteps.map((step, index) => (
+                        <Fragment key={step.id}>
+                            <div className={`mapping-flow-step ${step.status}`}>
+                                <span className="mapping-flow-number">{step.status === 'done' ? '✓' : index + 1}</span>
+                                <span>{step.label}</span>
+                            </div>
+                            {index < workflowSteps.length - 1 && (
+                                <span className="mapping-flow-connector" aria-hidden="true" />
+                            )}
+                        </Fragment>
+                    ))}
                 </div>
-                <div className="info-row">
-                    <span className="info-label">Client:</span>
-                    <span>{clientId}</span>
-                </div>
-
-                {error && <div className="error">{error}</div>}
-                {loading && <p className="mapping-note">Classifying accounts using AI...</p>}
             </div>
+
+            {error && <div className="card mapping-shell mapping-alert">{error}</div>}
+            {loading && <div className="card mapping-shell mapping-alert mapping-alert-info">Classifying accounts...</div>}
 
             {!loading && accounts.length > 0 && (
-                <div className="card-mapping-body">
+                <div className="card-mapping-body mapping-shell mapping-body">
                     <h2 className="title">Confirm Account Categories</h2>
                     <p className="mapping-note">
                         Review each account's suggested category. Unclassified accounts must be resolved before saving.
@@ -144,6 +220,10 @@ function AccountMappingPage() {
                     {unresolvedCount > 0 ? (
                         <div className="review-counter">
                             {unresolvedCount} account{unresolvedCount > 1 ? 's' : ''} still need{unresolvedCount === 1 ? 's' : ''} a category
+                        </div>
+                    ) : unusualCount > 0 ? (
+                        <div className="review-counter review-counter-done">
+                            All accounts have suggested categories. Review the flagged items before saving.
                         </div>
                     ) : (
                         <div className="review-counter review-counter-done">
@@ -180,19 +260,39 @@ function AccountMappingPage() {
                                     return (
                                         <tr key={acc.account_name} className={unresolved ? 'row-needs-review' : ''}>
                                             <td><span className="original-col">{acc.account_name}</span></td>
-                                            <td>{acc.total_debit.toLocaleString()}</td>
-                                            <td>{acc.total_credit.toLocaleString()}</td>
+                                            <td>{Number(acc.total_debit || 0).toLocaleString()}</td>
+                                            <td>{Number(acc.total_credit || 0).toLocaleString()}</td>
                                             <td>
-                                                <select
-                                                    className="mapping-select select-text"
-                                                    value={acc.suggested_category === 'unknown' ? '' : acc.suggested_category}
-                                                    onChange={(e) => handleCategoryChange(acc.account_name, e.target.value)}
-                                                >
-                                                    <option value="">-- Select category --</option>
-                                                    {categories.map(cat => (
-                                                        <option key={cat} value={cat}>{cat}</option>
-                                                    ))}
-                                                </select>
+                                                <div className="mapping-choice-stack">
+                                                    <select
+                                                        className="mapping-select select-text"
+                                                        value={acc.category_mode === 'custom' ? CUSTOM_CATEGORY_VALUE : (acc.suggested_category === 'unknown' ? '' : acc.suggested_category)}
+                                                        onChange={(e) => handleCategoryChange(acc.account_name, e.target.value)}
+                                                    >
+                                                        <option value="">-- Select category --</option>
+                                                        {categories.map(cat => (
+                                                            <option key={cat} value={cat}>{cat}</option>
+                                                        ))}
+                                                        <option value={CUSTOM_CATEGORY_VALUE}>Other / Custom</option>
+                                                    </select>
+                                                    {acc.category_mode === 'custom' && (
+                                                        <div className="mapping-custom-wrap">
+                                                            <input
+                                                                className="mapping-custom-input"
+                                                                type="text"
+                                                                value={acc.custom_category || ''}
+                                                                onChange={(e) => handleCustomCategoryChange(acc.account_name, e.target.value)}
+                                                                placeholder="Type custom category..."
+                                                            />
+                                                            {acc.original_suggested_category && (
+                                                                <span className="mapping-custom-hint">
+                                                                    Previously suggested: {acc.original_suggested_category}
+                                                                </span>
+                                                            )}
+                                                            <span className="mapping-custom-hint">Enter the category you need.</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td>
                                                 {unresolved ? (
@@ -219,37 +319,38 @@ function AccountMappingPage() {
                         </table>
                     </div>
 
-                    {!saved ? (
-                        <button className="btn" onClick={handleSave} disabled={saving || unresolvedCount > 0}>
-                            {saving ? 'Saving...' : 'Confirm & Save Account Mapping'}
-                        </button>
-                    ) : (
-                        <div>
-                            <div className="success">Account mapping saved successfully!</div>
-                            <button
-                                className="btn btn-secondary"
-                                onClick={async () => {
-                                    try {
-                                        const formData = new FormData()
-                                        formData.append('file_id', cleanResult.file_id)
-                                        formData.append('client_id', clientId)
-                                        formData.append('file_type', fileType || 'general')
-                                        formData.append('step', 'account_mapping')
-                                        formData.append('next_stage', 'financial_analysis')
-                                        await completeWorkflowStep(formData)
-                                        console.log('Workflow step completed successfully')
-                                    } catch (err) {
-                                        console.error('Failed to mark workflow step complete:', err)
-                                    }
-                                    navigate('/financial-statements', {
-                                        state: { cleanResult, clientId, uploadResult, fileType }
-                                    })
-                                }}
-                            >
-                                Proceed to Financial Statements →
+                    <div className="mapping-footer-actions">
+                        {!saved ? (
+                            <button className="btn" onClick={handleSave} disabled={saving || unresolvedCount > 0}>
+                                {saving ? 'Saving...' : 'Confirm & Save Account Mapping'}
                             </button>
-                        </div>
-                    )}
+                        ) : (
+                            <div className="mapping-save-stack">
+                                <div className="success">Account mapping saved successfully!</div>
+                                <button
+                                    className="btn btn-secondary"
+                                    onClick={async () => {
+                                        try {
+                                            const formData = new FormData()
+                                            formData.append('file_id', fileId)
+                                            formData.append('client_id', clientId)
+                                            formData.append('file_type', effectiveFileType)
+                                            formData.append('step', 'account_mapping')
+                                            formData.append('next_stage', 'financial_analysis')
+                                            await completeWorkflowStep(formData)
+                                        } catch (err) {
+                                            console.error('Failed to mark workflow step complete:', err)
+                                        }
+                                        navigate('/financial-statements', {
+                                            state: { cleanResult: effectiveCleanResult, clientId, uploadResult, fileType: effectiveFileType }
+                                        })
+                                    }}
+                                >
+                                    Proceed to Financial Statements →
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
         </div>

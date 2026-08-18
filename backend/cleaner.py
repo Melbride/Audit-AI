@@ -12,6 +12,104 @@ BOOLEAN_VALUE_GROUPS = [
     {'active', 'inactive'},
 ]
 
+# Summary row indicators - words that suggest a row is a total/subtotal/summary
+SUMMARY_INDICATORS = {
+    'total', 'subtotal', 'grand total', 'sum', 'net', 'balance', 'closing',
+    'total assets', 'total liabilities', 'total equity', 'total revenue',
+    'total expenses', 'net income', 'gross profit', 'operating profit'
+}
+
+def is_summary_row(row: pd.Series, mapping: dict, file_type: str = None) -> bool:
+    """
+    Determines if a row is a summary/total/subtotal row rather than a normal account record.
+    Uses multiple pieces of evidence to avoid false positives on legitimate accounts
+    that happen to contain words like "Total" in their description.
+    
+    Evidence considered:
+    1. Account/code field is empty or None
+    2. Description/label contains summary indicators
+    3. Most accounting/numeric fields are blank or zero
+    4. File type is accounting-related (trial_balance, general_ledger)
+    
+    Returns True if the row appears to be a summary row, False otherwise.
+    """
+    # Identify common account/code and description columns
+    account_code_cols = []
+    description_cols = []
+    numeric_cols = []
+    
+    for original_col, info in mapping.items():
+        if not isinstance(info, dict):
+            continue
+        mapped_to = info.get("mapped_to", "").lower()
+        field_type = info.get("field_type", "")
+        
+        # Account/code columns
+        if any(term in mapped_to for term in ['account_code', 'account_number', 'account_no', 'gl_code', 'code']):
+            account_code_cols.append(mapped_to)
+        # Description/label columns
+        elif any(term in mapped_to for term in ['account_name', 'account_description', 'description', 'particulars', 'label']):
+            description_cols.append(mapped_to)
+        # Numeric/accounting columns
+        elif field_type == 'numeric' and mapped_to not in ('debit', 'credit'):
+            numeric_cols.append(mapped_to)
+    
+    # If we can't identify the structure, be conservative and don't classify as summary
+    if not account_code_cols and not description_cols:
+        return False
+    
+    # Evidence 1: Account/code field should be empty or None for summary rows
+    has_empty_code = False
+    for col in account_code_cols:
+        if col in row.index:
+            val = row.get(col)
+            if pd.isna(val) or str(val).strip() == "":
+                has_empty_code = True
+                break
+    
+    # Evidence 2: Description should contain summary indicators
+    has_summary_indicator = False
+    for col in description_cols:
+        if col in row.index:
+            val = row.get(col)
+            if pd.notna(val) and str(val).strip():
+                val_lower = str(val).strip().lower()
+                # Check if any summary indicator is a standalone word or at the start
+                for indicator in SUMMARY_INDICATORS:
+                    if val_lower == indicator or val_lower.startswith(indicator + ' ') or val_lower.endswith(' ' + indicator):
+                        has_summary_indicator = True
+                        break
+        if has_summary_indicator:
+            break
+    
+    # Evidence 3: Most numeric fields should be blank or zero for summary rows
+    numeric_fields_blank_or_zero = 0
+    total_numeric_fields = 0
+    for col in numeric_cols:
+        if col in row.index:
+            total_numeric_fields += 1
+            val = row.get(col)
+            if pd.isna(val) or str(val).strip() == "" or float(val) == 0:
+                numeric_fields_blank_or_zero += 1
+    
+    # Make the determination
+    # For accounting files, be more lenient (require fewer evidence points)
+    is_accounting_file = file_type in ('trial_balance', 'general_ledger')
+    
+    if is_accounting_file:
+        # Accounting file: Need at least 2 of 3 evidence points
+        evidence_count = sum([
+            has_empty_code,
+            has_summary_indicator,
+            (total_numeric_fields > 0 and numeric_fields_blank_or_zero / total_numeric_fields >= 0.7)
+        ])
+        return evidence_count >= 2
+    else:
+        # Non-accounting file: Need all 3 evidence points to be conservative
+        return has_empty_code and has_summary_indicator and (
+            total_numeric_fields == 0 or numeric_fields_blank_or_zero / total_numeric_fields >= 0.8
+        )
+
 # Function to detect ambiguous date strings
 def detect_ambiguous_date_string(val_str: str):
     """
@@ -79,12 +177,13 @@ def detect_duplicate_mappings(mapping: dict) -> dict:
     return {standard_name: cols for standard_name, cols in seen.items() if len(cols) > 1}
 
 # Main function to clean the dataframe based on the confirmed mapping
-def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None) -> tuple:
+def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None, file_type: str = None) -> tuple:
     """
     Main cleaning function, takes a raw dataframe and confirmed column mapping.
     Mapping structure: {original_col: {"mapped_to": "amount", "field_type": "numeric"}}
     fill_rates: {original_col: float} — proportion of non-empty values per column (0.0 to 1.0).
     Columns with fill rate below 50% get one summary flag instead of per-row missing value flags.
+    file_type: Optional file type (e.g., 'trial_balance', 'general_ledger') for summary row detection.
     Returns cleaned dataframe and a validation report.
     Raises ValueError early if the mapping has two original columns mapped to the same
     standard field name — this would otherwise create duplicate column names after renaming
@@ -120,7 +219,7 @@ def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None) ->
     # Standardize text column casing
     df = standardize_casing(df, mapping, issues)
     # Handle null values — pass fill_rates so sparse columns get a summary flag instead of per-row noise
-    df = handle_nulls(df, mapping, issues, fill_rates)
+    df = handle_nulls(df, mapping, issues, fill_rates, file_type)
     # Check text columns for inconsistent boolean/status values
     check_value_consistency(df, mapping, issues)
     # Check for near-duplicate values (same value with minor variations)
@@ -544,17 +643,27 @@ def check_date_order(df: pd.DataFrame, mapping: dict, issues: list) -> None:
                 })
 
 # Function to handle null values
-def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict = None) -> pd.DataFrame:
+def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict = None, file_type: str = None) -> pd.DataFrame:
     """
     Flags two types of issues:
     1. Missing values in confirmed mapped columns — with fill-rate-aware logic:
        - Fill rate < 50%: flag ONCE with the fill rate percentage (per-row flags would be noise)
        - Fill rate >= 50%: flag per-row so each missing value gets auditor attention
+       - Summary/total rows are excluded from required-field validation for accounting files
     2. Unknown columns, flagged once per column, never per row. Includes fill rate summary if available.
     Does not drop or fill any values, auditor decides.
+    file_type: Optional file type (e.g., 'trial_balance', 'general_ledger') for summary row detection.
     """
     if fill_rates is None:
         fill_rates = {}
+
+    # Classify summary rows for accounting files to exclude them from required-field validation
+    summary_row_indices = set()
+    if file_type in ('trial_balance', 'general_ledger'):
+        for idx in df.index:
+            row = df.loc[idx]
+            if is_summary_row(row, mapping, file_type):
+                summary_row_indices.add(idx)
 
     # Flag unknown columns once, not per row. Use original_col since unknown columns were never renamed
     for original_col, info in mapping.items():
@@ -624,7 +733,10 @@ def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict
             })
         else:
             # Normal column, flag each missing value individually so the auditor can address them
+            # Skip summary rows for accounting files
             for idx, value in df[col].items():
+                if idx in summary_row_indices:
+                    continue  # Skip required-field validation for summary rows
                 if pd.isna(value) or str(value).strip() == "" or value == "":
                     issues.append({
                         "row": int(idx) + 2,

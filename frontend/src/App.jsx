@@ -7,6 +7,7 @@ import CleanPage from './pages/CleanPage'
 import AnalysisPage from './pages/AnalysisPage'
 import AnalysisHistory from './pages/AnalysisHistory'
 import CorrectedResultsPage from './pages/CorrectedResultsPage'
+import Insights from './pages/Insights .jsx'
 import TrialBalancePage from './pages/TrialBalancePage'
 import AccountMappingPage from './pages/AccountMappingPage'
 
@@ -76,10 +77,6 @@ function App() {
         <Route path="/password-reset/done" element={<PasswordResetDone />} />
         <Route path="/password-reset/confirm/:token" element={<SetNewPassword />} />
         <Route path="/password-reset/complete" element={<PasswordResetComplete />} />
-        <Route path="/clients/:clientId" element={<ClientDetailsPage />} />
-        <Route path="/trial-balance" element={<TrialBalancePage />} />
-        <Route path="/account-mapping" element={<AccountMappingPage />} />
-        <Route path="/financial-statements" element={<FinancialStatementsPage />} />
         {/* All authenticated pages (wrapped in Layout — persistent sidebar) */}
 
         {/* AI Pipeline pages */}
@@ -114,6 +111,36 @@ function App() {
           }
         />
         <Route
+          path="/trial-balance"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <TrialBalancePage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/account-mapping"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <AccountMappingPage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/financial-statements"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <FinancialStatementsPage />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/analysis"
           element={
             <RequireAuth user={user}>
@@ -141,6 +168,27 @@ function App() {
             <RequireAuth user={user}>
               <Layout user={user} onLogout={handleLogout}>
                 <AnalysisPage user={user} />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        {/* AI Insights full page */}
+        <Route
+          path="/insights"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Insights />
+              </Layout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/insights/:clientId/:fileId"
+          element={
+            <RequireAuth user={user}>
+              <Layout user={user} onLogout={handleLogout}>
+                <Insights />
               </Layout>
             </RequireAuth>
           }

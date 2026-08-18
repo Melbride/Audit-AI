@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
 # Auth-related imports for password hashing and JWT tokens
 from passlib.context import CryptContext
@@ -28,18 +28,23 @@ import re
 import shutil
 import secrets
 import hashlib
+import time
+import warnings
 import io
 from dotenv import load_dotenv
 
 # AI detection helpers, used to identify columns and suggest file types
 from detector import detect_columns_with_llm, build_detection_result, suggest_file_type, FILE_TYPE_CATEGORIES
 
+# Header detection for Excel files with report-style metadata
+from header_detector import detect_excel_header, detect_csv_header
+
 # Shared JWT auth dependency (decodes token, restricts routes by role)
-from auth import require_role
+from auth import require_role, get_current_user
 
 # Database helper functions for mappings, uploads, corrections, snapshots, and acknowledgments
 from database import (
-    init_db, get_db, get_connection, save_mapping, get_mapping, save_upload, get_uploads,
+    init_db, get_db, get_connection, save_mapping, get_mapping, save_upload, get_upload, get_uploads,
     save_cleaning_acknowledgment, get_acknowledged_issue_ids,
     save_cleaning_corrections, get_cleaning_corrections,
     save_fingerprint, get_fingerprint,
@@ -49,6 +54,7 @@ from database import (
     get_saved_analyses_for_engagement, get_saved_analyses_for_file,
     get_or_create_workspace, get_workspace_by_id, update_workspace_data, get_engagement_workspaces, get_user_workspaces,
     get_workflow_stage, update_workflow_stage, mark_workflow_step_completed, initialize_workflow_stage,
+     save_tb_validation_result, clear_tb_validation_result, normalize_mapped_to,
 )
 
 # Cleaning engine, Excel export, and Excel diff logic
@@ -103,8 +109,8 @@ from section_tracking import router as section_tracking_router
 app.include_router(section_tracking_router)
 
 # Financial statement starter template (Trial Balance + 3-statement skeleton)
-from statement_template import router as statement_template_router
-app.include_router(statement_template_router)
+# from statement_template import router as statement_template_router
+# app.include_router(statement_template_router)
 
 # Auth configuration: secret key, hashing algorithm, token lifetime, and password hashing context
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -181,19 +187,38 @@ def extract_docx(file_path: str):
 
 # Read a file from disk into a dataframe based on its extension, cleaning up
 # empty columns, whitespace, and reserved internal columns along the way
-def read_file_to_df(save_path: str, ext: str):
+# Now includes smart header detection for Excel files to handle report-style metadata
+def read_file_to_df(save_path: str, ext: str, sheet_name: str = None, file_type: Optional[str] = None, header_row_index: Optional[int] = None):
+    metadata = {}
     if ext == "csv":
-        df = pd.read_csv(save_path, dtype=str)
+        # Use CSV header detection for files with potential metadata blocks
+        if header_row_index is not None:
+            # Use stored header row index directly
+            df = pd.read_csv(save_path, header=header_row_index, dtype=str)
+        else:
+            # Run header detection with file_type context
+            header_row, df, metadata = detect_csv_header(save_path, file_type)
     elif ext in ["xlsx", "xls"]:
-        df = pd.read_excel(save_path, dtype=str)
+        # Use Excel header detection to find actual table header and extract metadata
+        if header_row_index is not None:
+            # Use stored header row index and sheet name directly
+            if sheet_name:
+                df = pd.read_excel(save_path, sheet_name=sheet_name, header=header_row_index, dtype=str)
+            else:
+                # If no sheet_name specified, read first sheet
+                df = pd.read_excel(save_path, header=header_row_index, dtype=str, sheet_name=0)
+        else:
+            # Run header detection with file_type context
+            header_row, df, metadata = detect_excel_header(save_path, sheet_name, file_type)
     elif ext == "pdf":
         df, _ = extract_pdf(save_path)
-        return df
+        return df, {}
     elif ext == "docx":
         df, _ = extract_docx(save_path)
-        return df
+        return df, {}
     else:
-        return None
+        return None, {}
+    
     if df is not None:
         df = df.dropna(axis=1, how='all')
         df = df.loc[:, ~(df == '').all()]
@@ -201,7 +226,8 @@ def read_file_to_df(save_path: str, ext: str):
         # Drop any reserved internal column (e.g. _row_id from a previously
         # exported workbook re-uploaded by mistake) before it's ever treated as real data
         df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
-    return df
+    
+    return df, metadata
 
 # Calculate the fraction of non-empty values in each column of a dataframe
 def calculate_fill_rates(df: pd.DataFrame) -> dict:
@@ -280,6 +306,48 @@ def compute_schema_fingerprint(columns: list) -> str:
     fingerprint = hashlib.md5(json.dumps(sorted_cols).encode()).hexdigest()
     return fingerprint
 
+# Helper function to get file-specific mapping using file_id
+def get_file_specific_mapping(file_id: str, client_id: str, file_type: str) -> dict:
+    """
+    Get mapping for a specific file using its file_id.
+    This ensures file-specific mapping isolation and prevents cross-file mapping pollution.
+    """
+    mapping = get_mapping(client_id, file_type, None, file_id)
+    if not mapping:
+        raise HTTPException(
+            status_code=400, 
+            detail="No saved mapping found for this specific file. Please detect the columns and confirm the mapping first."
+        )
+    
+    return mapping
+
+# Validate mapping for duplicate target fields before saving
+def validate_mapping_before_save(mapping: dict) -> tuple:
+    """
+    Validate a mapping before saving to catch duplicate target fields.
+    Returns (is_valid, error_message).
+    """
+    seen = {}
+    for original_col, info in mapping.items():
+        if not isinstance(info, dict):
+            continue
+        raw_mapped_to = str(info.get("mapped_to", "")).strip()
+        mapped_to = normalize_mapped_to(raw_mapped_to)
+        # "unknown" is allowed to repeat
+        if mapped_to == ("unknown"):
+            continue
+        seen.setdefault(mapped_to, []).append(original_col)
+    
+    duplicates = {standard_name: cols for standard_name, cols in seen.items() if len(cols) > 1}
+    if duplicates:
+        details = "; ".join(
+            f"'{standard_name}' is claimed by columns {cols}"
+            for standard_name, cols in duplicates.items()
+        )
+        return False, f"Mapping conflict: two or more original columns are mapped to the same field. {details}. Please give each column a unique 'Mapped To' value."
+    
+    return True, None
+
 # Find an uploaded file on disk by its file_id, trying each allowed extension
 def locate_uploaded_file(file_id: str, preferred_ext=None):
     if preferred_ext and preferred_ext in ALLOWED_EXTENSIONS:
@@ -291,6 +359,17 @@ def locate_uploaded_file(file_id: str, preferred_ext=None):
         if os.path.exists(path):
             return path, extension
     return None, None
+
+def remove_uploaded_file_variants(file_id: str, keep_ext: str | None = None):
+    for extension in ALLOWED_EXTENSIONS:
+        if keep_ext and extension == keep_ext:
+            continue
+        path = os.path.join(UPLOAD_DIR, f"{file_id}.{extension}")
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 # Strip the "[UNRESOLVED]" marker from a header label to get its real underlying name
 def normalize_header_label(value) -> str:
@@ -433,8 +512,14 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     save_path, file_ext = locate_uploaded_file(file_id)
     if not save_path:
         raise HTTPException(status_code=404, detail="File not found. Please upload the file first.")
+    
+    # Get stored header configuration from uploads table
+    upload_record = get_upload(file_id)
+    stored_header_row = upload_record.get('header_row_index') if upload_record else None
+    stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
+    
     try:
-        df = read_file_to_df(save_path, file_ext)
+        df, metadata = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not read file.")
     except Exception as e:
@@ -444,7 +529,7 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     df = apply_saved_corrections(df, mapping, corrections)
     fill_rates = calculate_fill_rates(df)
     try:
-        cleaned_df, report = clean_dataframe(df, mapping, fill_rates)
+        cleaned_df, report = clean_dataframe(df, mapping, fill_rates, file_type)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cleaning failed: {str(e)}")
     report = enrich_issues_with_ids(report, file_id, client_id, file_type)
@@ -670,6 +755,7 @@ class Engagement(BaseModel):
     status: Optional[str] = "Planning"
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    sections: List[str]
 
 # Pydantic model for assigning a user to an engagement team
 class EngagementTeam(BaseModel):
@@ -731,15 +817,112 @@ def root():
 
 # Upload a file for the AI pipeline (CSV, Excel, PDF, or DOCX), extract its
 # contents into a dataframe, and return a preview along with column info
+# Inspect Excel sheets for multi-sheet file upload
+@app.post("/upload/inspect-sheets")
+async def inspect_sheets(file: UploadFile = File(...)):
+    ext = get_extension(file.filename)
+    if ext not in ["xlsx", "xls"]:
+        return {"filename": file.filename, "sheets": []}
+    
+    file_bytes = await file.read()
+    try:
+        excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
+        sheets = []
+        for sheet_name in excel_file.sheet_names:
+            try:
+                df = pd.read_excel(excel_file, sheet_name=sheet_name, dtype=str)
+                df = df.dropna(axis=1, how='all')
+                df = df.loc[:, ~(df == '').all()]
+                sheets.append({
+                    "name": sheet_name,
+                    "rows": len(df),
+                    "cols": len(df.columns)
+                })
+            except Exception:
+                sheets.append({
+                    "name": sheet_name,
+                    "rows": 0,
+                    "cols": 0
+                })
+        return {"filename": file.filename, "sheets": sheets}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not inspect Excel sheets: {str(e)}")
+
+
+# Get preview data for a specific Excel sheet
+@app.post("/upload/sheet-preview")
+async def get_sheet_preview(
+    file: UploadFile = File(...),
+    sheet_name: str = Form(...)
+):
+    ext = get_extension(file.filename)
+    if ext not in ["xlsx", "xls"]:
+        raise HTTPException(status_code=400, detail="File is not an Excel document.")
+    
+    file_bytes = await file.read()
+    temp_path = os.path.join(UPLOAD_DIR, f"preview_{uuid.uuid4()}.xlsx")
+    try:
+        with open(temp_path, "wb") as buffer:
+            buffer.write(file_bytes)
+        excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
+        if sheet_name not in excel_file.sheet_names:
+            raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found in Excel file.")
+
+        _, df, _ = detect_excel_header(temp_path, sheet_name, file_type=None)
+        if df is None:
+            raise HTTPException(status_code=400, detail=f"Could not read sheet '{sheet_name}'.")
+        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
+        df = df.dropna(axis=1, how='all')
+        df = df.loc[:, ~(df == '').all()]
+        df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read sheet '{sheet_name}': {str(e)}")
+    finally:
+        # Robust file cleanup with retry mechanism for Windows file locking
+        if os.path.exists(temp_path):
+            for attempt in range(5):  # Try up to 5 times
+                try:
+                    os.remove(temp_path)
+                    break
+                except PermissionError:
+                    if attempt < 4:  # Don't sleep on the last attempt
+                        time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 0.1s, 0.2s, 0.3s, 0.4s
+                    else:
+                        # Log warning but don't fail the request if cleanup fails
+                        warnings.warn(f"Could not delete temporary file {temp_path} after 5 attempts due to file locking")
+    
+    return {
+        "sheet_name": sheet_name,
+        "rows": len(df),
+        "columns": list(df.columns),
+        "preview": df.head(5).fillna("").to_dict(orient="records")
+    }
+
+
+# Upload a file for the AI pipeline (CSV, Excel, PDF, or DOCX), extract its
+# contents into a dataframe, and return a preview along with column info
 @app.post("/upload")
 async def upload_file_ai(
     file: UploadFile = File(...),
     client_id: str = Form(...),
-    section_id: int = Form(None)
+    section_id: int = Form(None),
+    engagement_id: int = Form(None),
+    uploaded_by: int = Form(None),
+    sheet_name: str = Form(None),
+    selected_sheets: str = Form(None)
 ):
     ext = get_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=415, detail=f"File type .{ext} not supported. Upload Excel, CSV, PDF or DOCX file only.")
+    if ext in ["xlsx", "xls"]:
+        try:
+            sheets_list = json.loads(selected_sheets) if selected_sheets else []
+        except json.JSONDecodeError:
+            sheets_list = []
+        if not sheets_list:
+            raise HTTPException(status_code=400, detail="Select at least one sheet before uploading.")
     MAX_FILE_SIZE = 50
     file_bytes = await file.read()
     file_size_mb = len(file_bytes) / (1024 * 1024)
@@ -756,7 +939,7 @@ async def upload_file_ai(
         df, source = extract_pdf(save_path)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not extract any content from PDF.")
-        save_upload(file_id, client_id, file.filename, ext, len(df), section_id)
+        save_upload(file_id, client_id, file.filename, ext, len(df), section_id, engagement_id=engagement_id, uploaded_by=uploaded_by)
         fill_rates = calculate_fill_rates(df)
         return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": source,
                 "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
@@ -767,30 +950,172 @@ async def upload_file_ai(
         df, source = extract_docx(save_path)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not extract any content from DOCX.")
-        save_upload(file_id, client_id, file.filename, ext, len(df), section_id)
+        save_upload(file_id, client_id, file.filename, ext, len(df), section_id, engagement_id=engagement_id, uploaded_by=uploaded_by)
         fill_rates = calculate_fill_rates(df)
         return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": source,
                 "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
                 "preview": df.head(5).fillna("").to_dict(orient="records"), "message": f"DOCX uploaded — extracted via {source}"}
 
-    # Handle CSV and Excel uploads
+    # Handle CSV and Excel uploads with smart header detection
+    # Use generic structural detection (file_type=None) for all uploads initially
+    header_row_index = None
     try:
-        df = pd.read_csv(save_path, dtype=str) if ext == "csv" else pd.read_excel(save_path, dtype=str)
-        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
-        df = df.dropna(axis=1, how='all')
-        df = df.loc[:, ~(df == '').all()]
-        # Drop any reserved internal column (e.g. _row_id from a previously
-        # exported workbook re-uploaded by mistake through the normal upload
-        # flow) before it's ever surfaced for column detection
-        df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
+        if ext == "csv":
+            header_row_index, df, metadata = detect_csv_header(save_path, file_type=None)
+        elif ext in ["xlsx", "xls"]:
+            header_row_index, df, metadata = detect_excel_header(save_path, sheet_name, file_type=None)
+        else:
+            df, metadata = None, {}
+            
+        if df is None:
+            raise HTTPException(status_code=400, detail="Could not read file.")
+            
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
-    save_upload(file_id, client_id, file.filename, ext, len(df), section_id)
+    
+    # Clean the DataFrame
+    if df is not None:
+        df = df.dropna(axis=1, how='all')
+        df = df.loc[:, ~(df == '').all()]
+        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
+        df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
+    
+    # Store header_row_index and sheet_name in database
+    save_upload(file_id, client_id, file.filename, ext, len(df), section_id, header_row_index, sheet_name, engagement_id, uploaded_by, selected_sheets)
     fill_rates = calculate_fill_rates(df)
-    return {"file_id": file_id, "client_id": client_id, "filename": file.filename, "source": "table",
-            "rows": len(df), "columns": list(df.columns), "fill_rates": fill_rates,
-            "fingerprint": compute_schema_fingerprint(list(df.columns)),
-            "preview": df.head(5).fillna("").to_dict(orient="records"), "message": "File uploaded and processed successfully"}
+    
+    response = {
+        "file_id": file_id, 
+        "client_id": client_id, 
+        "filename": file.filename, 
+        "source": "table",
+        "rows": len(df), 
+        "columns": list(df.columns), 
+        "fill_rates": fill_rates,
+        "fingerprint": compute_schema_fingerprint(list(df.columns)),
+        "preview": df.head(5).fillna("").to_dict(orient="records"), 
+        "message": "File uploaded and processed successfully"
+    }
+    
+    # Include extracted metadata if any was found
+    if metadata:
+        response["metadata"] = metadata
+    
+    return response
+
+
+# Re-upload a corrected Trial Balance against the same file_id.
+@app.post("/trial-balance/upload-corrected")
+async def upload_corrected_trial_balance(
+    file: UploadFile = File(...),
+    file_id: str = Form(...),
+    client_id: str = Form(...),
+    file_type: str = Form("trial_balance"),
+    corrected_by: str = Form(None),
+    sheet_name: str = Form(None),
+):
+    ext = get_extension(file.filename)
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail=f"File type .{ext} not supported. Upload Excel, CSV, PDF or DOCX file only.")
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM uploads WHERE file_id = %s AND client_id = %s", (file_id, client_id))
+    existing_upload = cursor.fetchone()
+    conn.close()
+    if not existing_upload:
+        raise HTTPException(status_code=404, detail="No existing Trial Balance upload was found for this file.")
+
+    old_save_path, old_ext = locate_uploaded_file(file_id, existing_upload.get("file_type"))
+    previous_fingerprint = None
+    if old_save_path:
+        try:
+            old_df, _ = read_file_to_df(old_save_path, old_ext)
+            if old_df is not None:
+                previous_fingerprint = compute_schema_fingerprint(list(old_df.columns))
+        except Exception:
+            previous_fingerprint = None
+
+    file_bytes = await file.read()
+    if len(file_bytes) / (1024 * 1024) > 50:
+        raise HTTPException(status_code=413, detail="Uploaded file exceeds the 50 MB limit.")
+    file.file.seek(0)
+
+    save_path = os.path.join(UPLOAD_DIR, f"{file_id}.{ext}")
+    with open(save_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    remove_uploaded_file_variants(file_id, keep_ext=ext)
+
+    try:
+        if ext == "pdf":
+            df, _ = extract_pdf(save_path)
+            if df is None:
+                raise HTTPException(status_code=400, detail="Could not extract any content from PDF.")
+        elif ext == "docx":
+            df, _ = extract_docx(save_path)
+            if df is None:
+                raise HTTPException(status_code=400, detail="Could not extract any content from DOCX.")
+        else:
+            df = pd.read_csv(save_path, dtype=str) if ext == "csv" else pd.read_excel(save_path, dtype=str, sheet_name=(sheet_name if sheet_name else 0))
+            df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
+            df = df.dropna(axis=1, how='all')
+            df = df.loc[:, ~(df == '').all()]
+            df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read corrected file: {str(e)}")
+
+    new_columns = list(df.columns)
+    new_fingerprint = compute_schema_fingerprint(new_columns)
+    same_structure = bool(previous_fingerprint and previous_fingerprint == new_fingerprint)
+
+    save_upload(file_id, client_id, file.filename, ext, len(df), existing_upload.get("section_id"))
+
+    response = {
+        "file_id": file_id,
+        "client_id": client_id,
+        "file_type": file_type,
+        "filename": file.filename,
+        "rows": len(df),
+        "columns": new_columns,
+        "fingerprint": new_fingerprint,
+        "same_structure": same_structure,
+        "preview": df.head(5).fillna("").to_dict(orient="records"),
+        "message": "Corrected Trial Balance uploaded successfully.",
+    }
+
+    if not same_structure:
+        clear_tb_validation_result(file_id, client_id, file_type)
+        update_workflow_stage(file_id, client_id, file_type, "uploaded")
+        response["next_step"] = "mapping"
+        response["detail"] = "The corrected file structure is different from the original TB. Please confirm mapping before validation."
+        return response
+
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
+
+    cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
+    save_cleaning_snapshot(file_id, client_id, file_type, cleaned_df)
+
+    if not report.get("can_proceed", False):
+        clear_tb_validation_result(file_id, client_id, file_type)
+        update_workflow_stage(file_id, client_id, file_type, "cleaning_in_progress")
+        response["next_step"] = "cleaning"
+        response["detail"] = "The corrected Trial Balance still has cleaning issues. Please review the cleaning result before validating again."
+        response["cleaning_report"] = report
+        response["cleaned_data"] = cleaned_df.fillna("").astype(str).to_dict(orient="records")
+        return response
+
+    validation_result = validate_trial_balance(cleaned_df, mapping)
+    save_tb_validation_result(file_id, client_id, file_type, validation_result)
+    update_workflow_stage(file_id, client_id, file_type, "tb_validation")
+    response["next_step"] = "tb_validation"
+    response["cleaning_report"] = report
+    response["cleaned_data"] = cleaned_df.fillna("").astype(str).to_dict(orient="records")
+    response["validation_result"] = validation_result
+    response["detail"] = (
+        "Trial balance is balanced." if validation_result.get("is_balanced") else
+        "Trial balance still does not balance. Review the difference before proceeding."
+    )
+    return response
 
 
 
@@ -818,8 +1143,8 @@ def get_file_preview(file_id: str, client_id: str = Query(...), db=Depends(get_d
     cursor = db.cursor(dictionary=True)
     
     cursor.execute("""
-        SELECT file_id, filename, row_count, file_type, semantic_file_type 
-        FROM uploads 
+        SELECT file_id, filename, row_count, file_type, semantic_file_type, header_row_index, sheet_name
+        FROM uploads
         WHERE file_id = %s AND client_id = %s
     """, (file_id, client_id))
     
@@ -838,17 +1163,17 @@ def get_file_preview(file_id: str, client_id: str = Query(...), db=Depends(get_d
             "error": "File not found in uploads table. It may have been deleted."
         }
     
-    # Try to load the file and get preview data
+    # Try to load the file using stored canonical header configuration
     try:
         file_path = os.path.join(UPLOAD_DIR, f"{file_id}.{upload['file_type']}")
-        if upload['file_type'] == 'csv':
-            df = pd.read_csv(file_path, dtype=str)
-        else:
-            df = pd.read_excel(file_path, dtype=str)
+        stored_header_row = upload.get('header_row_index')
+        stored_sheet_name = upload.get('sheet_name')
         
-        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
-        df = df.dropna(axis=1, how='all')
-        df = df.loc[:, ~(df == '').all()]
+        # Use read_file_to_df with stored header configuration to ensure canonical consistency
+        df, _ = read_file_to_df(file_path, upload['file_type'], stored_sheet_name, file_type=None, header_row_index=stored_header_row)
+        
+        if df is None:
+            raise Exception("Could not read file using stored header configuration")
         
         result = {
             "file_id": upload['file_id'],
@@ -1015,11 +1340,17 @@ async def detect_columns_endpoint(
     if not save_path:
         raise HTTPException(status_code=404, detail="File not found. Please upload the file first.")
 
-    # Read the file and grab one sample value per column to help with detection
+    # Get stored header configuration from uploads table
+    upload_record = get_upload(file_id)
+    stored_header_row = upload_record.get('header_row_index') if upload_record else None
+    stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
+
+    # Read the file using stored header configuration (not re-detecting)
     try:
-        df = read_file_to_df(save_path, file_ext)
+        df, metadata = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not read file.")
+        
         sample_values = {}
         for col in columns_list:
             if col in df.columns:
@@ -1040,6 +1371,29 @@ async def detect_columns_endpoint(
     # Save this schema's fingerprint so future uploads with the same columns can be recognized
     computed_fingerprint = compute_schema_fingerprint(columns_list)
     save_fingerprint(client_id, computed_fingerprint, effective_file_type, columns_list)
+    
+    # First check for file-specific mapping (file_id-based isolation)
+    file_specific_mapping = get_mapping(client_id, effective_file_type, None, file_id)
+    if file_specific_mapping:
+        # File-specific mapping found - use it
+        filtered_mapping = {
+            col: file_specific_mapping.get(col)
+            for col in columns_list
+            if col in file_specific_mapping
+        }
+        if filtered_mapping and len(filtered_mapping) == len(columns_list):
+            result = build_detection_result(columns_list, filtered_mapping, sample_values, fill_rates_dict)
+            result["file_id"] = file_id
+            result["source"] = "file_specific"
+            result["message"] = "Loaded mapping for this specific file."
+            result["suggested_file_type"] = file_type_suggestion["file_type"]
+            result["suggested_file_type_label"] = file_type_suggestion["file_type_label"]
+            # Include metadata if it was extracted during header detection
+            if metadata:
+                result["metadata"] = metadata
+            return result
+    
+    # Fall back to fingerprint-based cache (kept for future explicit reuse feature)
     saved_mapping = get_mapping(client_id, effective_file_type, computed_fingerprint)
     existing_fp = get_fingerprint(client_id, computed_fingerprint, effective_file_type)
 
@@ -1058,6 +1412,9 @@ async def detect_columns_endpoint(
             result["message"] = "Mapping reused from cache."
             result["suggested_file_type"] = file_type_suggestion["file_type"]
             result["suggested_file_type_label"] = file_type_suggestion["file_type_label"]
+            # Include metadata if it was extracted during header detection
+            if metadata:
+                result["metadata"] = metadata
             return result
 
     # Saved mapping hit: only trust this if every uploaded column is covered by the saved mapping
@@ -1072,6 +1429,9 @@ async def detect_columns_endpoint(
             # Return the actual saved file_type instead of suggestion
             result["suggested_file_type"] = effective_file_type
             result["suggested_file_type_label"] = FILE_TYPE_CATEGORIES.get(effective_file_type, effective_file_type)
+            # Include metadata if it was extracted during header detection
+            if metadata:
+                result["metadata"] = metadata
             return result
 
     # No usable cache found: run LLM detection on the columns
@@ -1137,6 +1497,11 @@ async def detect_columns_endpoint(
     result["source"] = "llm_detection"
     result["suggested_file_type"] = file_type_suggestion["file_type"]
     result["suggested_file_type_label"] = file_type_suggestion["file_type_label"]
+    
+    # Include metadata if it was extracted during header detection
+    if metadata:
+        result["metadata"] = metadata
+    
     return result
 
 # Save a confirmed column mapping for a client and file type
@@ -1155,14 +1520,46 @@ async def save_mapping_endpoint(
         raise HTTPException(status_code=400, detail="Invalid mapping format.")
     if not mapping_dict:
         raise HTTPException(status_code=400, detail="Mapping cannot be empty. Please provide a valid mapping.")
+    
+    # Validate for duplicate target fields before saving
+    is_valid, validation_error = validate_mapping_before_save(mapping_dict)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=validation_error)
+
+    # Accounting-aware header validation: if file_type is trial_balance or general_ledger,
+    # run accounting-aware detection to validate the stored header row
+    parsing_warnings = []
+    if file_id and file_type in ["trial_balance", "general_ledger"]:
+        save_path, file_ext = locate_uploaded_file(file_id)
+        if save_path and file_ext in ["xlsx", "xls"]:
+            upload_record = get_upload(file_id)
+            stored_header_row = upload_record.get('header_row_index') if upload_record else None
+            stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
+            
+            # Run accounting-aware detection to see if it suggests a different header
+            try:
+                accounting_header_row, _, _ = detect_excel_header(save_path, stored_sheet_name, file_type=file_type)
+                if accounting_header_row != stored_header_row:
+                    parsing_warnings.append(
+                        f"Accounting-aware detection suggests header row {accounting_header_row} "
+                        f"but stored configuration uses row {stored_header_row}. "
+                        f"Review the table structure for correctness."
+                    )
+            except Exception:
+                pass  # Don't fail save if validation detection fails
 
     # If we have access to the original file, validate that each column's
     # declared field_type is consistent with its actual data before saving
+    # Use stored header configuration for consistency
     if file_id:
         save_path, file_ext = locate_uploaded_file(file_id)
         if save_path:
+            upload_record = get_upload(file_id)
+            stored_header_row = upload_record.get('header_row_index') if upload_record else None
+            stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
+            
             try:
-                df = read_file_to_df(save_path, file_ext)
+                df, _ = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
                 if df is not None:
                     problems = validate_field_types_against_data(df, mapping_dict)
                     if problems:
@@ -1177,7 +1574,7 @@ async def save_mapping_endpoint(
                 # saving entirely — this check is a safety net, not the source of truth
                 pass
 
-    save_mapping(client_id, file_type, mapping_dict, confirmed_by, fingerprint)
+    save_mapping(client_id, file_type, mapping_dict, confirmed_by, fingerprint, file_id)
     
     # Also update the uploads table with the semantic file_type for future reference
     if file_id:
@@ -1192,8 +1589,13 @@ async def save_mapping_endpoint(
     if file_id:
         update_workflow_stage(file_id, client_id, file_type, "mapped")
     
-    return {"client_id": client_id, "file_type": file_type, "columns_saved": len(mapping_dict),
-            "message": f"Mapping saved successfully for client {client_id} and file type {file_type}."}
+    response = {"client_id": client_id, "file_type": file_type, "columns_saved": len(mapping_dict),
+                "message": f"Mapping saved successfully for client {client_id} and file type {file_type}."}
+    
+    if parsing_warnings:
+        response["parsing_warnings"] = parsing_warnings
+    
+    return response
 
 # Retrieve a previously saved column mapping for a client and file type
 @app.get("/get-mapping/{client_id}")
@@ -1219,9 +1621,29 @@ async def clean_file(
     client_id: str = Form(...),
     file_type: str = Form("general")
 ) -> dict:
-    mapping = get_mapping(client_id, file_type)
+    # Get the fingerprint for this specific file to ensure file-specific mapping retrieval
+    save_path, file_ext = locate_uploaded_file(file_id)
+    if not save_path:
+        raise HTTPException(status_code=404, detail="File not found. Please upload the file first.")
+    
+    # Get stored header configuration from uploads table
+    upload_record = get_upload(file_id)
+    stored_header_row = upload_record.get('header_row_index') if upload_record else None
+    stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
+    
+    try:
+        df, _ = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
+        if df is None:
+            raise HTTPException(status_code=400, detail="Could not read file.")
+        fingerprint = compute_schema_fingerprint(list(df.columns))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not compute file fingerprint: {str(e)}")
+    
+    # Use file_id for file-specific mapping retrieval
+    mapping = get_mapping(client_id, file_type, None, file_id)
     if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found for this client. Please detect the columns and confirm the mapping first.")
+        raise HTTPException(status_code=400, detail="No saved mapping found for this specific file. Please detect the columns and confirm the mapping first.")
+    
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     return {"file_id": file_id, "client_id": client_id, "file_type": file_type,
             "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),
@@ -1233,9 +1655,7 @@ async def clean_file(
 # of it so a later corrected upload can be compared against this exact state
 @app.get("/clean/export-cleaned/{file_id}")
 async def export_cleaned_workbook(file_id: str, client_id: str, file_type: str = "general"):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found for this client. Please detect the columns and confirm the mapping first.")
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     save_cleaning_snapshot(file_id, client_id, file_type, cleaned_df)
     workbook_buffer = build_cleaning_workbook(cleaned_df, report, mapping)
@@ -1256,9 +1676,7 @@ async def submit_corrected_excel(
     file_type: str = Form("general"),
     corrected_by: str = Form(None),
 ):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found for this client. Please detect the columns and confirm the mapping first.")
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
 
     snapshot_rows = get_cleaning_snapshot(file_id, client_id, file_type)
     if not snapshot_rows:
@@ -1439,9 +1857,7 @@ async def acknowledge_issue_endpoint(
     issue: str = Form(...),
     acknowledged_by: str = Form(None),
 ):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found for this client.")
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
     try:
         issue_dict = json.loads(issue)
     except json.JSONDecodeError:
@@ -1466,9 +1882,7 @@ async def submit_inline_corrections_endpoint(
     corrections: str = Form(...),
     corrected_by: str = Form(None),
 ):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found for this client.")
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
     try:
         corrections_list = json.loads(corrections)
     except json.JSONDecodeError:
@@ -1547,16 +1961,19 @@ async def standardize_value_endpoint(
     to_value: str = Form(...),
     corrected_by: str = Form(None),
 ):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found for this client.")
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
 
     save_path, file_ext = locate_uploaded_file(file_id)
     if not save_path:
         raise HTTPException(status_code=404, detail="File not found. Please upload the file first.")
+    
+    # Get stored header configuration from uploads table
+    upload_record = get_upload(file_id)
+    stored_header_row = upload_record.get('header_row_index') if upload_record else None
+    stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
 
     try:
-        df = read_file_to_df(save_path, file_ext)
+        df, _ = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not read file.")
     except Exception as e:
@@ -1621,12 +2038,7 @@ async def analyze_financials(
     file_id: str = Form(...),
     file_type: str = Form("general")
 ):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(
-            status_code=400,
-            detail="No saved mapping found for this client. Please complete column mapping first."
-        )
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
     # Run the cleaning cycle to ensure the data is up-to-date and valid before analysis
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     if not report.get("can_proceed", False):
@@ -1651,13 +2063,7 @@ async def analyze_insights(
     file_id: str = Form(...),
     file_type: str = Form("general")
 ):
-    # Ensure that a mapping exists for this client and file type before proceeding
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(
-            status_code=400,
-            detail="No saved mapping found for this client. Please complete column mapping first."
-        )
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
     # Run the cleaning cycle to ensure the data is up-to-date and valid before generating insights
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     # Check if the cleaned data is valid and ready for analysis
@@ -1704,12 +2110,7 @@ async def validate_trial_balance_endpoint(
     client_id: str = Form(...),
     file_type: str = Form("general")
 ):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(
-            status_code=400,
-            detail="No saved mapping found for this client. Please complete column mapping first."
-        )
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     if not report.get("can_proceed", False):
         raise HTTPException(
@@ -1717,6 +2118,8 @@ async def validate_trial_balance_endpoint(
             detail="This file still has unresolved cleaning issues. Please finish cleaning before validating the trial balance."
         )
     validation_result = validate_trial_balance(cleaned_df, mapping)
+    save_tb_validation_result(file_id, client_id, file_type, validation_result)
+    update_workflow_stage(file_id, client_id, file_type, "tb_validation")
     return {
         "client_id": client_id,
         "file_id": file_id,
@@ -1731,13 +2134,7 @@ async def detect_account_mapping_endpoint(
     client_id: str = Form(...),
     file_type: str = Form("general")
 ):
-    # Get mapping 
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(
-            status_code=400,
-            detail="No saved mapping found for this client. Please complete column mapping first."
-        )
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
 
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     if not report.get("can_proceed", False):
@@ -1785,12 +2182,7 @@ async def generate_financial_statements_endpoint(
     client_id: str = Form(...),
     file_type: str = Form("general")
 ):
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        raise HTTPException(
-            status_code=400,
-            detail="No saved mapping found for this client. Please complete column mapping first."
-        )
+    mapping = get_file_specific_mapping(file_id, client_id, file_type)
 
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
 
@@ -2307,9 +2699,14 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     # Use the original file extension from upload record if available
     original_ext = upload.get("file_type") if upload.get("file_type") in ALLOWED_EXTENSIONS else None
     save_path, file_ext = locate_uploaded_file(file_id, original_ext)
+    
+    # Get stored header configuration from uploads table
+    stored_header_row = upload.get('header_row_index')
+    stored_sheet_name = upload.get('sheet_name')
+    
     if save_path:
         try:
-            df = read_file_to_df(save_path, file_ext)
+            df, _ = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
             if df is not None:
                 columns = list(df.columns)
                 fill_rates = calculate_fill_rates(df)
@@ -2342,21 +2739,16 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
         if ft_row:
             file_type = ft_row["file_type"]
 
-    # Check if a mapping exists for this client and file fingerprint
-    # If no fingerprint available, fall back to file_type check
-    # If a workflow row already exists, mapping obviously happened — trust that over brittle fingerprint match
+    # Check if a mapping exists for this specific file (file-specific mapping isolation)
+    # This prevents cross-file mapping reuse when files have identical schemas
+    # If a workflow row already exists, mapping obviously happened — trust that over file_id check
     if existing_workflow_row:
         has_mapping = True
-    elif fingerprint:
-        cursor.execute(
-            "SELECT COUNT(*) AS cnt FROM column_mappings WHERE client_id = %s AND fingerprint = %s",
-            (client_id, fingerprint)
-        )
-        has_mapping = cursor.fetchone()["cnt"] > 0
     else:
+        # Check for file-specific mapping using file_id
         cursor.execute(
-            "SELECT COUNT(*) AS cnt FROM column_mappings WHERE client_id = %s AND file_type = %s",
-            (client_id, file_type)
+            "SELECT COUNT(*) AS cnt FROM column_mappings WHERE client_id = %s AND file_id = %s",
+            (client_id, file_id)
         )
         has_mapping = cursor.fetchone()["cnt"] > 0
 
@@ -2377,7 +2769,7 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     # Initialize workflow variable
     workflow = None
 
-    # Determine stage - mapping is shared across files of same type, but cleaning is file-specific
+    # Determine stage - mapping is now file-specific, not shared across files
     if not has_mapping:
         stage = "uploaded"
     elif cleaned:
@@ -2512,13 +2904,22 @@ def delete_mapping(mapping_id: int, db=Depends(get_db)):
 # List all engagements with their client's company name, most recent first,
 # along with an auto-derived workflow status (see compute_engagement_status_fields)
 @app.get("/engagements")
-def get_engagements(db=Depends(get_db)):
+def get_engagements(db=Depends(get_db), current_user: dict = Depends(get_current_user)):
     cursor = db.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT e.*, c.company_name FROM engagements e
-        LEFT JOIN clients c ON e.client_id = c.client_id
-        ORDER BY e.created_at DESC
-    """)
+    if current_user["role"] == "Accountant":
+        cursor.execute("""
+            SELECT e.*, c.company_name FROM engagements e
+            LEFT JOIN clients c ON e.client_id = c.client_id
+            INNER JOIN engagement_team et ON et.engagement_id = e.engagement_id
+            WHERE et.user_id = %s
+            ORDER BY e.created_at DESC
+        """, (current_user["user_id"],))
+    else:
+        cursor.execute("""
+            SELECT e.*, c.company_name FROM engagements e
+            LEFT JOIN clients c ON e.client_id = c.client_id
+            ORDER BY e.created_at DESC
+        """)
     engagements = cursor.fetchall()
     if not engagements:
         return engagements
@@ -2530,7 +2931,7 @@ def get_engagements(db=Depends(get_db)):
 
 # Get a single engagement by id, with its client's company name and derived status
 @app.get("/engagements/{engagement_id}")
-def get_engagement(engagement_id: int, db=Depends(get_db)):
+def get_engagement(engagement_id: int, db=Depends(get_db), current_user: dict = Depends(get_current_user)):
     cursor = db.cursor(dictionary=True)
     cursor.execute("""
         SELECT e.*, c.company_name FROM engagements e
@@ -2540,13 +2941,35 @@ def get_engagement(engagement_id: int, db=Depends(get_db)):
     engagement = cursor.fetchone()
     if not engagement:
         raise HTTPException(status_code=404, detail="Engagement not found")
+    if current_user["role"] == "Accountant":
+        cursor.execute(
+            "SELECT 1 FROM engagement_team WHERE engagement_id = %s AND user_id = %s",
+            (engagement_id, current_user["user_id"])
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=403, detail="You are not assigned to this engagement.")
     progress_by_id = fetch_engagement_progress(db, [engagement_id])
     apply_display_status(engagement, progress_by_id.get(engagement_id, {}))
     return engagement
 
 # Create a new engagement and automatically create its four default audit sections
+# Checks the audit period is real and start comes before end
+def validate_engagement_dates(start_date: Optional[str], end_date: Optional[str]):
+    if not start_date or not end_date:
+        return
+    start = pd.to_datetime(start_date, errors="coerce")
+    end = pd.to_datetime(end_date, errors="coerce")
+    if pd.isna(start) or pd.isna(end):
+        raise HTTPException(status_code=400, detail="Start date and end date must be valid dates.")
+    if start > end:
+        raise HTTPException(status_code=400, detail="Start date must be on or before end date.")
+
+# Create a new engagement and its selected audit sections
 @app.post("/engagements")
 def create_engagement(e: Engagement, db=Depends(get_db)):
+    validate_engagement_dates(e.start_date, e.end_date)
+    if not e.sections:
+        raise HTTPException(status_code=400, detail="Select at least one audit section for this engagement.")
     cursor = db.cursor()
     cursor.execute(
         """INSERT INTO engagements (client_id, engagement_name, financial_year, status, start_date, end_date)
@@ -2554,15 +2977,16 @@ def create_engagement(e: Engagement, db=Depends(get_db)):
         (e.client_id, e.engagement_name, e.financial_year, e.status, e.start_date, e.end_date)
     )
     engagement_id = cursor.lastrowid
-    for section in ["Revenue", "Expenses", "Inventory", "Cash & Bank"]:
+    for section in e.sections:
         cursor.execute("INSERT INTO audit_sections (engagement_id, section_name) VALUES (%s, %s)",
                        (engagement_id, section))
     db.commit()
-    return {"engagement_id": engagement_id, "message": "Engagement created with default audit sections"}
+    return {"engagement_id": engagement_id, "message": "Engagement created with selected audit sections"}
 
 # Update an existing engagement
 @app.put("/engagements/{engagement_id}")
 def update_engagement(engagement_id: int, e: Engagement, db=Depends(get_db)):
+    validate_engagement_dates(e.start_date, e.end_date)
     cursor = db.cursor()
     cursor.execute(
         """UPDATE engagements SET client_id=%s, engagement_name=%s, financial_year=%s,
@@ -2632,6 +3056,15 @@ def add_team_member(engagement_id: int, t: EngagementTeam, db=Depends(get_db)):
     cursor = db.cursor()
     cursor.execute("INSERT INTO engagement_team (engagement_id, user_id, role) VALUES (%s, %s, %s)",
                    (engagement_id, t.user_id, t.role))
+    if t.role == "Accountant":
+        info_cursor = db.cursor(dictionary=True)
+        info_cursor.execute("SELECT engagement_name FROM engagements WHERE engagement_id = %s", (engagement_id,))
+        info = info_cursor.fetchone()
+        if info:
+            cursor.execute(
+                "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                (t.user_id, f"You have been assigned to {info['engagement_name']}", "engagement_assigned", engagement_id)
+            )
     db.commit()
     return {"team_id": cursor.lastrowid, "message": "Team member added"}
 
@@ -2781,9 +3214,14 @@ def get_submission_review_data(submission_id: int, db=Depends(get_db)):
     file_type = upload.get("semantic_file_type") or upload.get("file_type") or "general"
     result["file"] = {"file_id": file_id, "filename": upload.get("filename"), "file_type": file_type}
 
-    mapping = get_mapping(client_id, file_type)
-    if not mapping:
-        return result
+    # Try to get file-specific mapping first, fall back to file_type if not found
+    try:
+        mapping = get_file_specific_mapping(file_id, client_id, file_type)
+    except HTTPException:
+        # No file-specific mapping exists, try file_type fallback
+        mapping = get_mapping(client_id, file_type)
+        if not mapping:
+            return result
 
     # Cleaning summary + TB validation are recomputed live from the current cleaned
     # state, same pattern used everywhere else in this codebase (never trust a stale snapshot)
@@ -2894,6 +3332,25 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
             )
 
     db.commit()
+    if s.status == "Approved":
+        progress_by_id = fetch_engagement_progress(db, [sub['engagement_id']])
+        progress = progress_by_id.get(sub['engagement_id'], {})
+        if progress.get("total_sections", 0) > 0 and progress.get("approved_sections", 0) == progress.get("total_sections", 0):
+            complete_cursor = db.cursor(dictionary=True)
+            complete_cursor.execute("""
+                SELECT DISTINCT u.user_id FROM users u
+                INNER JOIN engagement_team et ON u.user_id = et.user_id
+                WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) IN
+                    ('Auditor', 'Senior Auditor', 'Assistant Manager', 'Audit Manager', 'Engagement Partner', 'Quality Reviewer')
+            """, (sub['engagement_id'],))
+            complete_message = f"All in-scope sections for {sub['engagement_name']} are now approved. Ready for final review."
+            write_cursor = db.cursor()
+            for row in complete_cursor.fetchall():
+                write_cursor.execute(
+                    "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                    (row['user_id'], complete_message, "engagement_ready", sub['engagement_id'])
+                )
+            db.commit()
     return {"message": f"Submission status updated to {s.status}"}
 
 # Delete a submission
@@ -3211,7 +3668,7 @@ def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, 
         cursor.execute("""
             SELECT DISTINCT u.user_id FROM users u
             INNER JOIN engagement_team et ON u.user_id = et.user_id
-            WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) = 'Accountant'
+            WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) = 'Auditor'
         """, (engagement_id,))
         for row in cursor.fetchall():
             write_cursor.execute(

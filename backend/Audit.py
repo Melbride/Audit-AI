@@ -16,6 +16,7 @@ import os
 import sys
 import secrets
 import hashlib
+import io
 from dotenv import load_dotenv
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 from detector import detect_columns_with_llm, build_detection_result, suggest_file_type
@@ -879,7 +880,7 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
     try:
-        cleaned_df, report = clean_dataframe(df, mapping)
+        cleaned_df, report = clean_dataframe(df, mapping, file_type=file_type)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cleaning failed: {str(e)}")
     return cleaned_df, report
@@ -890,10 +891,75 @@ def root():
     return {"message": "AuditIQ API is running"}
 
 # ── AI UPLOAD ROUTES ──────────────────────────────────────────────────────────
+@app.post("/upload/inspect-sheets")
+async def inspect_sheets(file: UploadFile = File(...)):
+    ext = get_extension(file.filename)
+    if ext not in ["xlsx", "xls"]:
+        return {"filename": file.filename, "sheets": []}
+    
+    file_bytes = await file.read()
+    try:
+        excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
+        sheets = []
+        for sheet_name in excel_file.sheet_names:
+            try:
+                df = pd.read_excel(excel_file, sheet_name=sheet_name, dtype=str)
+                df = df.dropna(axis=1, how='all')
+                df = df.loc[:, ~(df == '').all()]
+                sheets.append({
+                    "name": sheet_name,
+                    "rows": len(df),
+                    "cols": len(df.columns)
+                })
+            except Exception:
+                sheets.append({
+                    "name": sheet_name,
+                    "rows": 0,
+                    "cols": 0
+                })
+        return {"filename": file.filename, "sheets": sheets}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not inspect Excel sheets: {str(e)}")
+
+
+@app.post("/upload/sheet-preview")
+async def get_sheet_preview(
+    file: UploadFile = File(...),
+    sheet_name: str = Form(...)
+):
+    ext = get_extension(file.filename)
+    if ext not in ["xlsx", "xls"]:
+        raise HTTPException(status_code=400, detail="File is not an Excel document.")
+    
+    file_bytes = await file.read()
+    try:
+        excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
+        if sheet_name not in excel_file.sheet_names:
+            raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found in Excel file.")
+        
+        df = pd.read_excel(excel_file, sheet_name=sheet_name, dtype=str)
+        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
+        df = df.dropna(axis=1, how='all')
+        df = df.loc[:, ~(df == '').all()]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read sheet '{sheet_name}': {str(e)}")
+    
+    return {
+        "sheet_name": sheet_name,
+        "rows": len(df),
+        "columns": list(df.columns),
+        "preview": df.head(5).fillna("").to_dict(orient="records")
+    }
+
+
 @app.post("/upload")
 async def upload_file_ai(
     file: UploadFile = File(...),
-    client_id: str = Form(...)
+    client_id: str = Form(...),
+    section_id: int = Form(None),
+    sheet_name: str = Form(None)
 ):
     ext = get_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
@@ -928,7 +994,13 @@ async def upload_file_ai(
                 "preview": df.head(5).fillna("").to_dict(orient="records"),
                 "message": f"DOCX uploaded — extracted via {source}"}
     try:
-        df = pd.read_csv(save_path, dtype=str) if ext == "csv" else pd.read_excel(save_path, dtype=str)
+        if ext == "csv":
+            df = pd.read_csv(save_path, dtype=str)
+        else:
+            if sheet_name:
+                df = pd.read_excel(save_path, sheet_name=sheet_name, dtype=str)
+            else:
+                df = pd.read_excel(save_path, dtype=str)
         df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
         df = df.dropna(axis=1, how='all')
         df = df.loc[:, ~(df == '').all()]
@@ -970,6 +1042,16 @@ async def detect_columns_endpoint(
                 sample_values[col] = ""
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
+    # First check for file-specific mapping (file_id-based isolation)
+    file_specific_mapping = get_mapping(client_id, file_type, None, file_id)
+    if file_specific_mapping and all(col in file_specific_mapping for col in columns_list):
+        filtered_mapping = {col: file_specific_mapping[col] for col in columns_list}
+        result = build_detection_result(columns_list, filtered_mapping)
+        result.update({"file_id": file_id, "source": "file_specific",
+                        "message": "Loaded mapping for this specific file."})
+        return result
+    
+    # Fall back to client-level mapping (legacy behavior)
     saved_mapping = get_mapping(client_id, file_type)
     if saved_mapping and all(col in saved_mapping for col in columns_list):
         filtered_mapping = {col: saved_mapping[col] for col in columns_list}
@@ -994,7 +1076,8 @@ async def save_mapping_endpoint(
     client_id: str = Form(...),
     file_type: str = Form(...),
     mapping: str = Form(...),
-    confirmed_by: str = Form(None)
+    confirmed_by: str = Form(None),
+    file_id: str = Form(None)
 ):
     try:
         mapping_dict = json.loads(mapping)
@@ -1002,7 +1085,7 @@ async def save_mapping_endpoint(
         raise HTTPException(status_code=400, detail="Invalid mapping format.")
     if not mapping_dict:
         raise HTTPException(status_code=400, detail="Mapping cannot be empty.")
-    save_mapping(client_id, file_type, mapping_dict, confirmed_by)
+    save_mapping(client_id, file_type, mapping_dict, confirmed_by, None, file_id)
     return {"client_id": client_id, "file_type": file_type, "columns_saved": len(mapping_dict),
             "message": f"Mapping saved successfully for client {client_id} and file type {file_type}."}
 
@@ -1026,9 +1109,10 @@ async def clean_file(
     client_id: str = Form(...),
     file_type: str = Form("general")
 ) -> dict:
-    mapping = get_mapping(client_id, file_type)
+    # Use file_id for file-specific mapping retrieval
+    mapping = get_mapping(client_id, file_type, None, file_id)
     if not mapping:
-        raise HTTPException(status_code=400, detail="No saved mapping found. Please detect and confirm the mapping first.")
+        raise HTTPException(status_code=400, detail="No saved mapping found for this specific file. Please detect and confirm the mapping first.")
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     return {"file_id": file_id, "client_id": client_id, "file_type": file_type,
             "cleaned_data": cleaned_df.fillna("").astype(str).map(lambda x: x.strip()).to_dict(orient="records"),

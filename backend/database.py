@@ -1,9 +1,35 @@
 import os
 import json
+import logging
+import re
 import mysql.connector
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Configure logging for normalization warnings
+logger = logging.getLogger(__name__)
+
+# Canonical field names - the single source of truth for standard financial field names
+CANONICAL_FIELDS = {
+    "account_name",
+    "debit",
+    "credit",
+    "date",
+    "amount",
+    "account_code",
+    "unknown",
+}
+
+# Alias mapping - maps known field name variants to their canonical forms
+# Based on evidence from existing code: account_classifier.py, trial_balance_validator.py
+CANONICAL_ALIASES = {
+    "account_description": "account_name",
+    "debit_amount": "debit",
+    "credit_amount": "credit",
+    "account_no": "account_code",
+    "account_number": "account_code",
+}
 
 # Database connection config. Reads from environment variables with fallback defaults for local development
 DB_CONFIG = {
@@ -60,6 +86,28 @@ def init_db():
     cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'column_mappings' AND column_name = 'required'", (DB_CONFIG["database"],))
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE column_mappings ADD COLUMN required TINYINT(1) NOT NULL DEFAULT 1")
+    
+    # Add fingerprint column for file-specific mapping isolation
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'column_mappings' AND column_name = 'fingerprint'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE column_mappings ADD COLUMN fingerprint VARCHAR(255) NULL AFTER confirmed_by")
+    
+    # Add file_id column for true file-specific mapping association
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'column_mappings' AND column_name = 'file_id'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE column_mappings ADD COLUMN file_id VARCHAR(255) NULL AFTER fingerprint")
+    
+    # Update uniqueness constraint to use file_id instead of file_type for file-specific isolation
+    # First drop the old uniqueness constraint if it exists
+    try:
+        cursor.execute("ALTER TABLE column_mappings DROP INDEX uq_column_mapping")
+    except Exception:
+        pass  # Index may not exist or may have already been dropped
+    
+    # Add new uniqueness constraint with file_id
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.statistics WHERE table_schema = %s AND table_name = 'column_mappings' AND index_name = 'uq_column_mapping'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE column_mappings ADD UNIQUE KEY uq_column_mapping (client_id, file_id, original_column)")
 
     # Clients table. Stores company information for each audit client
     cursor.execute("""
@@ -268,6 +316,12 @@ def init_db():
     cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'file_name'", (DB_CONFIG["database"],))
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE uploads ADD COLUMN file_name VARCHAR(255) NULL")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'header_row_index'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE uploads ADD COLUMN header_row_index INT NULL")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'sheet_name'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE uploads ADD COLUMN sheet_name VARCHAR(255) NULL")
     cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'file_path'", (DB_CONFIG["database"],))
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE uploads ADD COLUMN file_path VARCHAR(500) NULL")
@@ -277,6 +331,15 @@ def init_db():
     cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'section_id'", (DB_CONFIG["database"],))
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE uploads ADD COLUMN section_id INT NULL")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'engagement_id'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE uploads ADD COLUMN engagement_id INT NULL")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'uploaded_by'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE uploads ADD COLUMN uploaded_by INT NULL")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'uploads' AND column_name = 'selected_sheets'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE uploads ADD COLUMN selected_sheets TEXT NULL")
 
     # Auditor acknowledgments for issues that are valid as-is.
     # Stores full issue detail columns so each acknowledgment is self-describing without needing a JOIN.
@@ -470,26 +533,76 @@ def init_db():
             tb_validation_completed     TINYINT(1) DEFAULT 0,
             account_mapping_completed   TINYINT(1) DEFAULT 0,
             financial_analysis_completed TINYINT(1) DEFAULT 0,
+            tb_validation_result        LONGTEXT NULL,
+            tb_validation_checked_at    DATETIME NULL,
             created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_workflow_stage (file_id, client_id)
         )
     """)
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'workflow_stages' AND column_name = 'tb_validation_result'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE workflow_stages ADD COLUMN tb_validation_result LONGTEXT NULL")
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'workflow_stages' AND column_name = 'tb_validation_checked_at'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE workflow_stages ADD COLUMN tb_validation_checked_at DATETIME NULL")
 
     conn.commit()
     conn.close()
 
 
+def normalize_mapped_to(mapped_to: str) -> str:
+    """
+    Normalize a mapped_to value to its canonical form.
+    
+    Rules:
+    - Empty/missing values → "unknown"
+    - Convert to lowercase, trim whitespace, replace spaces with underscores
+    - Already canonical → unchanged
+    - Known alias → canonical form
+    - Unknown value → preserved as-is with warning logged
+    
+    This ensures that both AI-generated and user-edited mappings are
+    normalized to a consistent canonical vocabulary before database storage.
+    """
+    if not mapped_to or mapped_to.strip() == "":
+        return "unknown"
+    
+    # Normalize: lowercase, trim, replace spaces with underscores (consistent with frontend)
+    normalized = re.sub(r'\s+', '_', mapped_to.strip().lower())
+    
+    # If already canonical, return as-is
+    if normalized in CANONICAL_FIELDS:
+        return normalized
+    
+    # Check if it's a known alias
+    if normalized in CANONICAL_ALIASES:
+        canonical = CANONICAL_ALIASES[normalized]
+        return canonical
+    
+    # Unknown mapping - preserve as-is but log for vocabulary review
+    logger.warning(
+        f"Unrecognized mapped_to value: '{mapped_to}' => '{normalized}'. "
+        f"Consider adding to CANONICAL_ALIASES if this is a valid field name variant."
+    )
+    return normalized
+
+
 # Save a confirmed column mapping for a client to the database.
 # Mapping is a dict of { "original_column": { "mapped_to": "amount", "field_type": "numeric" } }
-# Deletes old mappings for this client+file_type first, then re-inserts — this is intentional so
+# Deletes old mappings for this client+file_id first, then re-inserts — this is intentional so
 # removed columns don't linger from a previous mapping round.
-def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: str = None, fingerprint: str = None):
+def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: str = None, fingerprint: str = None, file_id: str = None):
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Use fingerprint for deletion if provided, otherwise fall back to file_type
-    if fingerprint:
+    # Use file_id for deletion if provided (file-specific mapping), otherwise fall back to fingerprint or file_type
+    if file_id:
+        cursor.execute(
+            "DELETE FROM column_mappings WHERE client_id = %s AND file_id = %s",
+            (client_id, file_id)
+        )
+    elif fingerprint:
         cursor.execute(
             "DELETE FROM column_mappings WHERE client_id = %s AND fingerprint = %s",
             (client_id, fingerprint)
@@ -503,12 +616,14 @@ def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: st
     for original_column, info in mapping.items():
         # Handle both old format (string) and new format (dict) for backwards compatibility
         if isinstance(info, dict):
-            mapped_to        = str(info.get("mapped_to", "unknown"))
+            raw_mapped_to    = str(info.get("mapped_to", "unknown"))
+            mapped_to        = normalize_mapped_to(raw_mapped_to)  # Normalize to canonical form
             field_type       = str(info.get("field_type", "unknown"))
             reviewed_unknown = 1 if info.get("reviewed_unknown") else 0
             required         = 1 if info.get("required", True) else 0
         else:
-            mapped_to        = str(info)
+            raw_mapped_to    = str(info)
+            mapped_to        = normalize_mapped_to(raw_mapped_to)  # Normalize to canonical form
             field_type       = "unknown"
             reviewed_unknown = 0
             required         = 1
@@ -518,8 +633,8 @@ def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: st
         
         cursor.execute("""
             INSERT INTO column_mappings
-                (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by, updated_at, fingerprint)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
+                (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by, updated_at, fingerprint, file_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
             ON DUPLICATE KEY UPDATE
                 mapped_to        = VALUES(mapped_to),
                 field_type       = VALUES(field_type),
@@ -527,7 +642,7 @@ def save_mapping(client_id: str, file_type: str, mapping: dict, confirmed_by: st
                 required         = VALUES(required),
                 confirmed_by     = VALUES(confirmed_by),
                 updated_at       = CURRENT_TIMESTAMP
-        """, (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by, effective_fingerprint))
+        """, (client_id, file_type, original_column, mapped_to, field_type, reviewed_unknown, required, confirmed_by, effective_fingerprint, file_id))
     conn.commit()
     conn.close()
 
@@ -615,16 +730,23 @@ def get_fingerprint(client_id: str, fingerprint: str, file_type: str = "general"
         conn.close()
 
 # Retrieve the saved column mapping for a client and file type.
-def get_mapping(client_id: str, file_type: str = "general", fingerprint: str = None) -> dict:
+def get_mapping(client_id: str, file_type: str = "general", fingerprint: str = None, file_id: str = None) -> dict:
     """
-    Retrieve the saved column mapping for a client and file type/fingerprint.
+    Retrieve the saved column mapping for a client and file type/fingerprint/file_id.
     Returns a dict of { "original_column": { "mapped_to": ..., "field_type": ..., "reviewed_unknown": ..., "required": ... } }
     Returns empty dict if no mapping has been saved for this client yet.
     """
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
     
-    if fingerprint:
+    # Use file_id for file-specific mapping retrieval if provided
+    if file_id:
+        cursor.execute("""
+            SELECT original_column, mapped_to, field_type, reviewed_unknown, required
+            FROM column_mappings
+            WHERE client_id = %s AND file_id = %s
+        """, (client_id, file_id))
+    elif fingerprint:
         cursor.execute("""
             SELECT original_column, mapped_to, field_type, reviewed_unknown, required
             FROM column_mappings
@@ -653,16 +775,40 @@ def get_mapping(client_id: str, file_type: str = "general", fingerprint: str = N
 
 # Save an upload record to the database after a file is successfully uploaded.
 # ON DUPLICATE KEY UPDATE prevents duplicate records if the same file_id is uploaded twice.
-def save_upload(file_id: str, client_id: str, filename: str, file_type: str, rows: int, section_id: int = None):
+def save_upload(file_id: str, client_id: str, filename: str, file_type: str, rows: int, section_id: int = None, header_row_index: int = None, sheet_name: str = None, engagement_id: int = None, uploaded_by: int = None, selected_sheets: str = None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO uploads (file_id, client_id, filename, file_type, row_count, section_id) VALUES (%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE file_id = file_id",
-        (file_id, client_id, filename, file_type, rows, section_id)
+        """
+        INSERT INTO uploads (file_id, client_id, filename, file_type, row_count, section_id, header_row_index, sheet_name, engagement_id, uploaded_by, selected_sheets)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            filename = VALUES(filename),
+            file_type = VALUES(file_type),
+            row_count = VALUES(row_count),
+            section_id = VALUES(section_id),
+            header_row_index = VALUES(header_row_index),
+            sheet_name = VALUES(sheet_name),
+            engagement_id = VALUES(engagement_id),
+            uploaded_by = VALUES(uploaded_by),
+            selected_sheets = VALUES(selected_sheets),
+            upload_time = CURRENT_TIMESTAMP,
+            upload_date = CURRENT_TIMESTAMP
+        """,
+        (file_id, client_id, filename, file_type, rows, section_id, header_row_index, sheet_name, engagement_id, uploaded_by, selected_sheets)
     )
     conn.commit()
     conn.close()
 
+
+# Get a single upload record by file_id, including header parsing configuration
+def get_upload(file_id: str) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM uploads WHERE file_id = %s LIMIT 1", (file_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 # Get all upload records for a client ordered by most recent first.
 # Returns an empty list if the client has no uploads yet.
@@ -1041,12 +1187,18 @@ def get_workflow_stage(file_id: str, client_id: str, file_type: str = "general")
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""
-        SELECT current_stage, tb_validation_completed, account_mapping_completed, financial_analysis_completed
+        SELECT current_stage, tb_validation_completed, account_mapping_completed, financial_analysis_completed,
+               tb_validation_result, tb_validation_checked_at
         FROM workflow_stages
         WHERE file_id = %s AND client_id = %s
     """, (file_id, client_id))
     result = cursor.fetchone()
     conn.close()
+    if result and result.get("tb_validation_result") and isinstance(result["tb_validation_result"], str):
+        try:
+            result["tb_validation_result"] = json.loads(result["tb_validation_result"])
+        except Exception:
+            pass
     return result
 
 def update_workflow_stage(file_id: str, client_id: str, file_type: str, stage: str):
@@ -1061,6 +1213,55 @@ def update_workflow_stage(file_id: str, client_id: str, file_type: str, stage: s
         VALUES (%s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE file_type = %s, current_stage = %s, updated_at = CURRENT_TIMESTAMP
     """, (file_id, client_id, file_type, stage, file_type, stage))
+    conn.commit()
+    conn.close()
+
+def save_tb_validation_result(file_id: str, client_id: str, file_type: str, validation_result: dict):
+    """
+    Persist the latest TB validation result so the page can be restored after
+    a refresh or interruption.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO workflow_stages (
+            file_id, client_id, file_type, current_stage,
+            tb_validation_result, tb_validation_checked_at
+        )
+        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON DUPLICATE KEY UPDATE
+            file_type = VALUES(file_type),
+            current_stage = VALUES(current_stage),
+            tb_validation_result = VALUES(tb_validation_result),
+            tb_validation_checked_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (file_id, client_id, file_type, "tb_validation", json.dumps(validation_result))
+    )
+    conn.commit()
+    conn.close()
+
+def clear_tb_validation_result(file_id: str, client_id: str, file_type: str):
+    """
+    Clear the cached TB validation snapshot when a corrected upload changes
+    the file structure and the previous result is no longer trustworthy.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO workflow_stages (file_id, client_id, file_type, current_stage)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            file_type = VALUES(file_type),
+            current_stage = VALUES(current_stage),
+            tb_validation_result = NULL,
+            tb_validation_checked_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (file_id, client_id, file_type, "uploaded")
+    )
     conn.commit()
     conn.close()
 

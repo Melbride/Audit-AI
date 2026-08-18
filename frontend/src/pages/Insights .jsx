@@ -1,5 +1,9 @@
-import { useState, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
+import { generateInsights } from "../services/api";
+import axios from "axios";
+
+const API_BASE = "http://localhost:8000";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -13,7 +17,6 @@ import {
   DollarSign,
   Calendar,
   Receipt,
-  Lightbulb,
   FileWarning,
 } from "lucide-react";
 import "../styles/analysis.css";
@@ -35,6 +38,20 @@ const SEVERITY_CONFIG = {
   statement_check: { icon: Receipt,       label: "Statement Check", tone: "danger" },
 };
 
+const SEVERITY_ORDER = { high: 0, medium: 1, info: 2 };
+
+const effectiveSeverity = (insight) => {
+  if (insight.severity) return insight.severity;
+  const cfg = SEVERITY_CONFIG[insight.type];
+  if (!cfg) return "info";
+  if (cfg.tone === "danger") return "high";
+  if (cfg.tone === "warning") return "medium";
+  return "info";
+};
+
+const sortBySeverity = (arr) =>
+  [...(arr || [])].sort((a, b) => SEVERITY_ORDER[effectiveSeverity(a)] - SEVERITY_ORDER[effectiveSeverity(b)]);
+
 const SEVERITY_FILTERS = [
   { key: "all", label: "All" },
   { key: "high", label: "High" },
@@ -45,26 +62,119 @@ const SEVERITY_FILTERS = [
 export default function Insights() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { insights, clientId, fileId, filename } = location.state || {};
+  const params = useParams();
+  
+  // Get data from either location.state (from AnalysisPage) or URL params (direct access)
+  const stateData = location.state || {};
+  const { insights: stateInsights, clientId: stateClientId, fileId: stateFileId, filename: stateFilename } = stateData;
+  
+  // URL params for independent access
+  const { clientId: urlClientId, fileId: urlFileId } = params || {};
+  
+  const [insights, setInsights] = useState(stateInsights || null);
+  const [clientId, setClientId] = useState(stateClientId || urlClientId || null);
+  const [fileId, setFileId] = useState(stateFileId || urlFileId || null);
+  const [filename, setFilename] = useState(stateFilename || null);
+  const [loading, setLoading] = useState(!stateInsights); // Load if no state data
+  const [error, setError] = useState(null);
 
   const [severityFilter, setSeverityFilter] = useState("all");
+  const [expandedInsights, setExpandedInsights] = useState({});
+
+  const toggleInsightExpansion = (index) => {
+    setExpandedInsights(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
+  };
+
+  // Independent data fetching when accessed via URL params
+  useEffect(() => {
+    if (stateInsights) {
+      // Already have data from state, no need to fetch
+      setLoading(false);
+      return;
+    }
+
+    if (!urlClientId || !urlFileId) {
+      // No data source available
+      setLoading(false);
+      setError("No insights data available. Please access insights from the Analysis page.");
+      return;
+    }
+
+    // Fetch insights independently
+    const fetchInsights = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const formData = new FormData();
+        formData.append("file_id", urlFileId);
+        formData.append("file_type", "general");
+        
+        const response = await generateInsights(urlClientId, formData);
+        setInsights(response.data.ai_insights || []);
+        
+        // Try to get file info for display
+        try {
+          const fileResponse = await axios.get(`${API_BASE}/files/${urlFileId}`);
+          setFilename(fileResponse.data?.filename || `File ${urlFileId}`);
+        } catch (fileErr) {
+          setFilename(`File ${urlFileId}`);
+        }
+      } catch (err) {
+        setError(err.response?.data?.detail || "Could not load insights. Please access insights from the Analysis page.");
+        setInsights([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInsights();
+  }, [stateInsights, urlClientId, urlFileId]);
 
   const filteredInsights = useMemo(() => {
     if (!insights) return [];
-    if (severityFilter === "all") return insights;
-    return insights.filter((i) => i.severity === severityFilter);
-  }, [insights, severityFilter]);
+    const base = severityFilter === "all" ? insights : insights.filter((i) => effectiveSeverity(i) === severityFilter);
+    return sortBySeverity(base);
+  }, [insights, severityFilter, effectiveSeverity]);
 
   const counts = useMemo(() => {
     const c = { high: 0, medium: 0, info: 0 };
     (insights || []).forEach((i) => {
-      if (c[i.severity] !== undefined) c[i.severity] += 1;
+      const sev = effectiveSeverity(i);
+      if (c[sev] !== undefined) c[sev] += 1;
     });
     return c;
-  }, [insights]);
+  }, [insights, effectiveSeverity]);
 
   // No insights were passed in — e.g. a direct page load / refresh — so
   // there's nothing to show. Send the auditor back to Analysis to generate.
+  if (loading) {
+    return (
+      <div className="analysis">
+        <div className="state-panel">
+          <div className="loading-spinner">Loading insights...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !insights) {
+    return (
+      <div className="analysis">
+        <div className="state-panel">
+          <FileWarning size={28} color="var(--text-soft)" />
+          <h3>Could not load insights</h3>
+          <p>{error}</p>
+          <button className="btn btn-primary" style={{ marginTop: "16px" }} onClick={() => navigate(-1)}>
+            Back to Previous Page
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!insights || insights.length === 0) {
     return (
       <div className="analysis">
@@ -89,10 +199,13 @@ export default function Insights() {
             {filename || "—"} · Client {clientId}
             {fileId ? ` · ${insights.length} insight${insights.length === 1 ? "" : "s"}` : ""}
           </p>
+          <p style={{ fontSize: "12px", color: "var(--text-soft)", marginTop: "4px" }}>
+            Sorted by priority — high-priority findings need attention first.
+          </p>
         </div>
         <div className="page-actions">
           <button className="btn btn-secondary" onClick={() => navigate(-1)}>
-            <ArrowLeft size={14} /> Back to Analytics
+            Back to Analytics
           </button>
         </div>
       </div>
@@ -122,17 +235,28 @@ export default function Insights() {
           {filteredInsights.map((insight, i) => {
             const cfg = SEVERITY_CONFIG[insight.type] || SEVERITY_CONFIG[insight.severity] || SEVERITY_CONFIG.info;
             const IconComponent = cfg.icon;
+            const isExpanded = expandedInsights[i];
+            const hasDetails = insight.why || insight.recommendation;
 
             return (
-              <div key={i} className="insight-card insight-card--full">
+              <div key={i} className={`insight-card insight-card--full ${isExpanded ? 'expanded' : ''}`}>
                 <div className="insight-card-body">
                   <div className="insight-card-head">
                     <IconComponent size={18} className="insight-icon" data-tone={cfg.tone} />
                     <span className="insight-tag">{cfg.label}</span>
+                    {hasDetails && (
+                      <button 
+                        className="insight-expand-btn"
+                        onClick={() => toggleInsightExpansion(i)}
+                        aria-expanded={isExpanded}
+                      >
+                        {isExpanded ? '−' : '+'}
+                      </button>
+                    )}
                   </div>
                   <p className="insight-message">{insight.message}</p>
 
-                  {(insight.why || insight.recommendation) && (
+                  {isExpanded && hasDetails && (
                     <div className="insight-detail">
                       {insight.why && (
                         <div className="insight-detail-row">
@@ -142,9 +266,7 @@ export default function Insights() {
                       )}
                       {insight.recommendation && (
                         <div className="insight-detail-row">
-                          <span className="insight-detail-label">
-                            <Lightbulb size={12} /> Recommended action
-                          </span>
+                          <span className="insight-detail-label">Recommended action</span>
                           <p>{insight.recommendation}</p>
                         </div>
                       )}
