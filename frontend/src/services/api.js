@@ -299,9 +299,8 @@ export const requestReportChanges = (reportId, data) =>
     API.post(`/api/reports/${reportId}/request-changes`, data)
 
 // Generate an export file (pdf | excel | csv) of the report's current version
-export const exportReport = (reportId, format) =>
-    API.post(`/api/reports/${reportId}/export`, null, { params: { format } })
-
+export const exportReport = (reportId, format, exportedBy) =>
+    API.post(`/api/reports/${reportId}/export`, { format, exported_by: exportedBy })
 // List every export previously generated for a report
 export const getReportExports = (reportId) =>
     API.get(`/api/reports/${reportId}/exports`)
@@ -462,6 +461,13 @@ export const submitWorkspaceForReview = (workspaceId, data) =>
 // Get all workspaces for an engagement
 export const getEngagementWorkspaces = (engagementId) =>
     API.get(`/engagements/${engagementId}/workspaces`)
+export const getEngagementFinalAnalysis = (engagementId) =>
+    API.get(`/engagements/${engagementId}/final-analysis`)
+export const saveEngagementFinalAnalysis = (engagementId, data) =>
+    API.post(`/engagements/${engagementId}/final-analysis/save`, data)
+// Move a draft report into the approval chain (draft -> pending_audit_manager)
+export const submitReportForApproval = (reportId) =>
+    API.post(`/api/reports/${reportId}/submit-for-approval`)
 
 
 

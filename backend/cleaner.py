@@ -642,172 +642,335 @@ def check_date_order(df: pd.DataFrame, mapping: dict, issues: list) -> None:
                     "severity": "medium"
                 })
 
-# Function to handle null values
-def handle_nulls(df: pd.DataFrame, mapping: dict, issues: list, fill_rates: dict = None, file_type: str = None) -> pd.DataFrame:
+def handle_nulls(
+    df: pd.DataFrame,
+    mapping: dict,
+    issues: list,
+    fill_rates: dict = None,
+    file_type: str = None
+) -> pd.DataFrame:
     """
-    Flags two types of issues:
-    1. Missing values in confirmed mapped columns — with fill-rate-aware logic:
-       - Fill rate < 50%: flag ONCE with the fill rate percentage (per-row flags would be noise)
-       - Fill rate >= 50%: flag per-row so each missing value gets auditor attention
-       - Summary/total rows are excluded from required-field validation for accounting files
-    2. Unknown columns, flagged once per column, never per row. Includes fill rate summary if available.
-    Does not drop or fill any values, auditor decides.
-    file_type: Optional file type (e.g., 'trial_balance', 'general_ledger') for summary row detection.
+    Validate missing values without modifying the source data.
+
+    Trial Balance rule:
+    - Individual blank Debit cells are allowed.
+    - Individual blank Credit cells are allowed.
+    - If the ENTIRE Debit column is empty -> HIGH issue.
+    - If the ENTIRE Credit column is empty -> HIGH issue.
+
+    Other mapped columns:
+    - Sparse columns (<50% filled): one summary warning.
+    - Normal columns (>=50% filled): flag individual missing cells.
     """
+
     if fill_rates is None:
         fill_rates = {}
 
-    # Classify summary rows for accounting files to exclude them from required-field validation
+    # Make absolutely sure we are working with a DataFrame.
+    if df is None or not isinstance(df, pd.DataFrame):
+        raise ValueError("Cleaning engine received an invalid or empty DataFrame.")
+
+    # ---------------------------------------------------------
+    # Identify summary rows for accounting files
+    # ---------------------------------------------------------
     summary_row_indices = set()
-    if file_type in ('trial_balance', 'general_ledger'):
+
+    if file_type in ("trial_balance", "general_ledger"):
         for idx in df.index:
-            row = df.loc[idx]
-            if is_summary_row(row, mapping, file_type):
-                summary_row_indices.add(idx)
+            try:
+                row = df.loc[idx]
+                if is_summary_row(row, mapping, file_type):
+                    summary_row_indices.add(idx)
+            except Exception:
+                pass
 
-    # Flag unknown columns once, not per row. Use original_col since unknown columns were never renamed
+    # ---------------------------------------------------------
+    # Unknown columns
+    # ---------------------------------------------------------
     for original_col, info in mapping.items():
-        if isinstance(info, dict) and info.get("mapped_to") == "unknown":
-            reviewed_unknown = bool(info.get("reviewed_unknown"))
-            rate = fill_rates.get(original_col)
-            # Build a clear message for the auditor based on why the column is unknown and its fill rate
-            if rate is not None:
-                fill_pct = round(rate * 100)
-                missing_pct = 100 - fill_pct
-                fill_note = f" {missing_pct}% of its values are empty."
-            else:
-                fill_note = ""
-            if reviewed_unknown:
-                base_msg = (
-                    f"Column '{original_col}' was left as unknown after review."
-                    f"{fill_note}"
-                    f" No checks were run on this column — review it carefully and confirm whether it contains relevant data."
-                )
-            else:
-                base_msg = (
-                    f"Column '{original_col}' could not be identified."
-                    f"{fill_note}"
-                    f" This column was excluded from all checks — review it carefully to confirm what it represents."
-                )
-            issues.append({
-                "row": "N/A",
-                "column": original_col,
-                "row_index": "N/A",
-                "original_value": "N/A",
-                "issue": base_msg,
-                "severity": "info" if reviewed_unknown else "medium"
-            })
 
-    # Flag missing values in confirmed columns using fill-rate-aware logic:
-    # Sparse columns (fill rate < 50%) → one summary flag, no per-row noise
-    # Normal columns (fill rate >= 50%) → per-row flags so each gap gets auditor attention
-    # Skip unknown mapped_to since those are already handled above
-    confirmed_columns = [
-        (original_col, info["mapped_to"])
-        for original_col, info in mapping.items()
-        if isinstance(info, dict)
-        and info.get("mapped_to") != "unknown"
-        and info.get("mapped_to") in df.columns
-    ]
+        if not isinstance(info, dict):
+            continue
 
-    for original_col, col in confirmed_columns:
-        if col == "_is_duplicate":
+        if info.get("mapped_to") != "unknown":
             continue
-        if col in ("debit", "credit"):
-            continue
-        rate = fill_rates.get(original_col, 1.0)  # Default to 1.0 (fully filled) if rate unknown
-        if rate < 0.5:
-            # Sparse column, flag once with fill rate context instead of flooding the report
+
+        reviewed_unknown = bool(info.get("reviewed_unknown"))
+        rate = fill_rates.get(original_col)
+
+        if rate is not None:
             fill_pct = round(rate * 100)
             missing_pct = 100 - fill_pct
+            fill_note = f" {missing_pct}% of its values are empty."
+        else:
+            fill_note = ""
+
+        if reviewed_unknown:
+            message = (
+                f"Column '{original_col}' was left as unknown after review."
+                f"{fill_note} "
+                "No checks were run on this column. Review it carefully "
+                "and confirm whether it contains relevant data."
+            )
+            severity = "info"
+        else:
+            message = (
+                f"Column '{original_col}' could not be identified."
+                f"{fill_note} "
+                "This column was excluded from all checks. Review it carefully "
+                "to confirm what it represents."
+            )
+            severity = "medium"
+
+        issues.append({
+            "row": "N/A",
+            "column": original_col,
+            "row_index": "N/A",
+            "original_value": "N/A",
+            "issue": message,
+            "severity": severity
+        })
+
+    # ---------------------------------------------------------
+    # Confirmed mapped columns
+    # ---------------------------------------------------------
+        # ---------------------------------------------------------
+    # Confirmed mapped columns
+    # ---------------------------------------------------------
+    confirmed_columns = [
+        (original_col, info["mapped_to"], info.get("required", True))
+        for original_col, info in mapping.items()
+        if (
+            isinstance(info, dict)
+            and info.get("mapped_to")
+            and info.get("mapped_to") != "unknown"
+            and info.get("mapped_to") in df.columns
+        )
+    ]
+
+    # ---------------------------------------------------------
+    # Validate each confirmed column
+    # ---------------------------------------------------------
+    for original_col, col, is_required in confirmed_columns:
+
+        if col == "_is_duplicate":
+            continue
+
+        # =====================================================
+        # TRIAL BALANCE DEBIT / CREDIT
+        # =====================================================
+        #
+        # A Trial Balance normally looks like:
+        #
+        # Account A | 1000 |       |
+        # Account B |      | 1000  |
+        #
+        # Therefore individual blanks are VALID.
+        #
+        # Only an entirely empty Debit/Credit column is an error.
+        # =====================================================
+
+        if file_type == "trial_balance" and (col.startswith("debit") or col.startswith("credit")):
+
+            values = df[col].copy()
+
+            # Treat empty strings and whitespace as missing.
+            values = values.replace(r"^\s*$", pd.NA, regex=True)
+
+            # Entire column has no data.
+            if values.isna().all():
+
+                issues.append({
+                    "row": "N/A",
+                    "column": col,
+                    "row_index": "N/A",
+                    "original_value": "N/A",
+                    "issue": (
+                        f"Trial Balance column '{col}' is completely empty. "
+                        f"A Trial Balance requires {col} values to be present. "
+                        "Review the uploaded file and confirm that the correct "
+                        f"'{col}' column was uploaded and mapped."
+                    ),
+                    "severity": "high"
+                })
+
+            # IMPORTANT:
+            # Do not perform normal per-row missing-value checks.
+            continue
+
+        # Optional columns (required=False in the mapping) never get missing-
+        # value or sparsity checks — the auditor has already confirmed this
+        # column isn't expected to be consistently filled.
+        if not is_required:
+            continue
+
+        # =====================================================
+        # ALL OTHER COLUMNS
+        # =====================================================
+
+        rate = fill_rates.get(original_col, 1.0)
+
+        # Sparse column -> one summary warning.
+        if rate < 0.5:
+
+            fill_pct = round(rate * 100)
+            missing_pct = 100 - fill_pct
+
             issues.append({
                 "row": "N/A",
                 "column": col,
                 "row_index": "N/A",
                 "original_value": "N/A",
                 "issue": (
-                    f"Column '{col}' is {missing_pct}% empty (only {fill_pct}% filled). "
-                    f"Confirm whether this is expected, if the data is missing, obtain the complete records before finalising your work"
+                    f"Column '{col}' is {missing_pct}% empty "
+                    f"(only {fill_pct}% filled). "
+                    "Confirm whether this is expected. If the data is missing, "
+                    "obtain the complete records before finalising your work."
                 ),
                 "severity": "medium"
             })
-        else:
-            # Normal column, flag each missing value individually so the auditor can address them
-            # Skip summary rows for accounting files
-            for idx, value in df[col].items():
-                if idx in summary_row_indices:
-                    continue  # Skip required-field validation for summary rows
-                if pd.isna(value) or str(value).strip() == "" or value == "":
-                    issues.append({
-                        "row": int(idx) + 2,
-                        "column": col,
-                        "row_index": idx,
-                        "original_value": "",
-                        "issue": f"Missing value in '{col}', this field should not be empty. Check the source data and fill in the correct value.",
-                        "severity": "medium"
-                    })
 
+            continue
+
+        # Normal column -> individual missing values.
+        for idx, value in df[col].items():
+
+            # Ignore accounting summary rows.
+            if idx in summary_row_indices:
+                continue
+
+            is_missing = (
+                pd.isna(value)
+                or str(value).strip() == ""
+            )
+
+            if is_missing:
+
+                issues.append({
+                    "row": int(idx) + 2,
+                    "column": col,
+                    "row_index": idx,
+                    "original_value": "",
+                    "issue": (
+                        f"Missing value in '{col}', this field should not "
+                        "be empty. Check the source data and fill in the "
+                        "correct value."
+                    ),
+                    "severity": "medium"
+                })
+
+    # VERY IMPORTANT:
+    # The function must return the DataFrame.
     return df
-    
-# Function to detect and flag duplicate rows
-def handle_duplicates(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame:
+
+# =============================================================
+# DUPLICATE DETECTION
+# =============================================================
+
+def handle_duplicates(
+    df: pd.DataFrame,
+    mapping: dict,
+    issues: list
+) -> pd.DataFrame:
     """
-    Detect two issues:
-    1. Exact duplicates, all column values identical. Flags and marks for removal.
-    2. Suspicious duplicates, same date + amount + vendor but different ID. Flagged for auditor review.
-    Does not remove any rows, auditor decides.
+    Detect exact and suspicious duplicate rows.
+
+    Does not remove rows. It only flags them for auditor review.
     """
-    # Initialize marker column to avoid KeyError in suspicious check if no exact duplicates exist
-    # Drop any pre-existing _is_duplicate column from the raw data before adding our own marker
+
+    # Safety check.
+    if df is None or not isinstance(df, pd.DataFrame):
+        raise ValueError(
+            "Duplicate detection received an invalid DataFrame."
+        )
+
+    # Remove an old marker if one already exists.
     if "_is_duplicate" in df.columns:
         df = df.drop(columns=["_is_duplicate"])
+
+    # Mark exact duplicate rows.
     df["_is_duplicate"] = df.duplicated(keep="first")
 
-    # Find all rows that are completely identical to another row
+    # ---------------------------------------------------------
+    # Exact duplicates
+    # ---------------------------------------------------------
     exact_duplicates = df[df.duplicated(keep=False)]
+
     for idx in exact_duplicates.index:
+
         issues.append({
             "row": int(idx) + 2,
             "column": "all columns",
             "row_index": idx,
             "original_value": str(df.loc[idx].to_dict()),
-            "issue": "This row is an exact duplicate of another row, check whether it was entered twice and remove the extra copy.",
+            "issue": (
+                "This row is an exact duplicate of another row. "
+                "Check whether it was entered twice and remove the "
+                "extra copy if necessary."
+            ),
             "severity": "high"
         })
 
-    # Find all date and numeric columns using the mapping for suspicious duplicate check
-    # Skip "unknown" mapped_to since those columns were left under their original name
+    # ---------------------------------------------------------
+    # Identify date columns
+    # ---------------------------------------------------------
     date_cols = [
-        info["mapped_to"] for info in mapping.values()
-        if isinstance(info, dict) and info.get("field_type") == "date"
-        and info.get("mapped_to") != "unknown"
-        and info.get("mapped_to") in df.columns
+        info["mapped_to"]
+        for info in mapping.values()
+        if (
+            isinstance(info, dict)
+            and info.get("field_type") == "date"
+            and info.get("mapped_to") != "unknown"
+            and info.get("mapped_to") in df.columns
+        )
     ]
+
+    # ---------------------------------------------------------
+    # Identify numeric columns
+    # ---------------------------------------------------------
     amount_cols = [
-        info["mapped_to"] for info in mapping.values()
-        if isinstance(info, dict) and info.get("field_type") == "numeric"
-        and info.get("mapped_to") != "unknown"
-        and info.get("mapped_to") in df.columns
+        info["mapped_to"]
+        for info in mapping.values()
+        if (
+            isinstance(info, dict)
+            and info.get("field_type") == "numeric"
+            and info.get("mapped_to") != "unknown"
+            and info.get("mapped_to") in df.columns
+        )
     ]
-    # Combine date and numeric columns for suspicious duplicate check
-    check_cols = date_cols + amount_cols
-    # Only check if we have at least one date and one numeric column
+
+    # ---------------------------------------------------------
+    # Suspicious duplicates
+    # ---------------------------------------------------------
     if date_cols and amount_cols:
+
+        check_cols = date_cols + amount_cols
+
         suspicious = df[
-            df.duplicated(subset=check_cols, keep=False)
-            # Exclude already flagged exact duplicates
+            df.duplicated(
+                subset=check_cols,
+                keep=False
+            )
             & ~df["_is_duplicate"]
         ]
-        # Flag suspicious duplicates for auditor review
+
         for idx in suspicious.index:
+
             issues.append({
                 "row": int(idx) + 2,
                 "column": str(check_cols),
                 "row_index": idx,
-                "original_value": str(df.loc[idx][check_cols].to_dict()),
-                "issue": "Same date and amount as another row, this may be a duplicate payment or entry. Verify before you proceed to analysis.",
+                "original_value": str(
+                    df.loc[idx][check_cols].to_dict()
+                ),
+                "issue": (
+                    "Same date and amount as another row. "
+                    "This may be a duplicate payment or entry. "
+                    "Verify before proceeding to analysis."
+                ),
                 "severity": "medium"
             })
+
     return df
 
 # Function to build the final validation report

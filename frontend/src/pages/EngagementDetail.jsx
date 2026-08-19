@@ -1,6 +1,7 @@
 // React hooks
 import { useState, useEffect, Fragment } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { BalanceSheetSummaryChart, AccountBreakdownChart, IncomeStatementChart } from "../components/FinancialCharts";
 // API functions
 import {
   getEngagement,
@@ -8,6 +9,8 @@ import {
   getSectionLatestSubmission,
   sendToClient,
   downloadStatementTemplate,
+  saveEngagementFinalAnalysis,
+  generateReport,
 } from "../services/api";
 import SectionMilestones from "../components/SectionMilestones";
 import SectionReviews from "../components/SectionReviews";
@@ -43,6 +46,9 @@ export default function EngagementDetail({ user }) {
   const [noteDrafts, setNoteDrafts] = useState({});        // in-progress note text per section, keyed by section_id
   const [expandedSection, setExpandedSection] = useState(null); // section_id currently showing milestones/reviews
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const [analysisState, setAnalysisState] = useState("idle"); // idle | saving | saved | error
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   // Load engagement data whenever the ID changes
   useEffect(() => {
@@ -186,12 +192,174 @@ export default function EngagementDetail({ user }) {
           <p style={{ color: "#166534", marginBottom: "12px" }}>
             All in-scope sections have been completed and approved.
           </p>
+
           <button
             className="action-btn secondary"
-            onClick={() => alert("Analysis integration not yet connected — placeholder action.")}
+            disabled={analysisState === "saving"}
+            onClick={async () => {
+              setAnalysisState("saving");
+              try {
+                const res = await saveEngagementFinalAnalysis(engagementId, {
+                  saved_by: user.user_id,
+                });
+                setAnalysisResult(res.data);
+                setAnalysisState("saved");
+              } catch (err) {
+                setAnalysisState("error");
+                alert(err.response?.data?.detail || "Failed to generate analysis.");
+              }
+            }}
           >
-            Generate Analysis
+            {analysisState === "saving" ? "Generating…" : "Generate Analysis"}
           </button>
+
+          {analysisState === "saved" && analysisResult && (
+            <div style={{ marginTop: "16px", border: "1px solid #E5E7EB", borderRadius: "8px", padding: "16px 20px", background: "#fff" }}>
+              <p style={{ fontWeight: 700, marginBottom: "12px" }}>Financial Analysis</p>
+
+              {analysisResult.financial_statements?.applicable ? (
+                <>
+                  {/* Balance Sheet */}
+                  <p style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", color: "#6B7280", marginBottom: "6px" }}>
+                    Balance Sheet
+                  </p>
+                  <table style={{ width: "100%", fontSize: "13px", marginBottom: "16px", borderCollapse: "collapse" }}>
+                    <tbody>
+                      <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "6px" }}>Assets</td></tr>
+                      {analysisResult.financial_statements.balance_sheet.assets.map((a, i) => (
+                        <tr key={`asset-${i}`}>
+                          <td style={{ paddingLeft: "12px" }}>{a.account_name} <span style={{ color: "#9CA3AF" }}>({a.category})</span></td>
+                          <td style={{ textAlign: "right" }}>{Number(a.amount).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Total Assets</td>
+                        <td style={{ textAlign: "right", fontWeight: 600 }}>
+                          {Number(analysisResult.financial_statements.balance_sheet.total_assets).toLocaleString()}
+                        </td>
+                      </tr>
+
+                      <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "12px" }}>Liabilities</td></tr>
+                      {analysisResult.financial_statements.balance_sheet.liabilities.map((l, i) => (
+                        <tr key={`liability-${i}`}>
+                          <td style={{ paddingLeft: "12px" }}>{l.account_name} <span style={{ color: "#9CA3AF" }}>({l.category})</span></td>
+                          <td style={{ textAlign: "right" }}>{Number(l.amount).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Total Liabilities</td>
+                        <td style={{ textAlign: "right", fontWeight: 600 }}>
+                          {Number(analysisResult.financial_statements.balance_sheet.total_liabilities).toLocaleString()}
+                        </td>
+                      </tr>
+
+                      {analysisResult.financial_statements.balance_sheet.equity.length > 0 && (
+                        <>
+                          <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "12px" }}>Equity</td></tr>
+                          {analysisResult.financial_statements.balance_sheet.equity.map((eq, i) => (
+                            <tr key={`equity-${i}`}>
+                              <td style={{ paddingLeft: "12px" }}>{eq.account_name}</td>
+                              <td style={{ textAlign: "right" }}>{Number(eq.amount).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+            <div style={{ marginBottom: "20px" }}>
+             <BalanceSheetSummaryChart balanceSheet={analysisResult.financial_statements.balance_sheet} />
+            </div>
+
+             {analysisResult.financial_statements.balance_sheet.assets.length > 0 && (
+              <div style={{ marginBottom: "20px" }}>
+               <p style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", color: "#6B7280", marginBottom: "6px" }}>
+                  Asset Breakdown
+                 </p>
+                <AccountBreakdownChart accounts={analysisResult.financial_statements.balance_sheet.assets} color="#2563EB" />
+              </div>
+            )}      
+
+
+                  {/* Income Statement */}
+                  {(analysisResult.financial_statements.income_statement.revenue.length > 0 ||
+                    analysisResult.financial_statements.income_statement.expenses.length > 0) && (
+                    <>
+                      <p style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", color: "#6B7280", marginBottom: "6px" }}>
+                        Income Statement
+                      </p>
+                      <table style={{ width: "100%", fontSize: "13px", marginBottom: "16px", borderCollapse: "collapse" }}>
+                        <tbody>
+                          <tr><td colSpan={2} style={{ fontWeight: 700 }}>Revenue</td></tr>
+                          {analysisResult.financial_statements.income_statement.revenue.map((r, i) => (
+                            <tr key={`rev-${i}`}>
+                              <td style={{ paddingLeft: "12px" }}>{r.account_name}</td>
+                              <td style={{ textAlign: "right" }}>{Number(r.amount).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                          <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "8px" }}>Expenses</td></tr>
+                          {analysisResult.financial_statements.income_statement.expenses.map((e, i) => (
+                            <tr key={`exp-${i}`}>
+                              <td style={{ paddingLeft: "12px" }}>{e.account_name}</td>
+                              <td style={{ textAlign: "right" }}>{Number(e.amount).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                          <tr>
+                            <td style={{ fontWeight: 700, paddingTop: "8px" }}>Net Profit</td>
+                            <td style={{ textAlign: "right", fontWeight: 700, paddingTop: "8px" }}>
+                              {Number(analysisResult.financial_statements.income_statement.net_profit).toLocaleString()}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <IncomeStatementChart incomeStatement={analysisResult.financial_statements.income_statement} />
+                    </>
+                  )}
+                </>
+              ) : (
+                <p style={{ color: "#6B7280", fontSize: "13px" }}>
+                  No account mapping was found — showing raw breakdown instead.
+                </p>
+              )}
+
+              {analysisResult.ai_insights?.length > 0 && (
+                <>
+                  <p style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", color: "#6B7280", marginBottom: "6px" }}>
+                    Insights
+                  </p>
+                  <ul style={{ fontSize: "13px", marginBottom: "16px", paddingLeft: "18px" }}>
+                    {analysisResult.ai_insights.map((insight, i) => (
+                      <li key={i}>{typeof insight === "string" ? insight : insight.text || JSON.stringify(insight)}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              <button
+                className="action-btn secondary"
+                disabled={generatingReport}
+                onClick={async () => {
+                  setGeneratingReport(true);
+                  try {
+                    const res = await generateReport({
+                      client_id: engagement.client_id,
+                      engagement_id: Number(engagementId),
+                      report_type: "custom",
+                      start_date: engagement.start_date,
+                      end_date: engagement.end_date,
+                      generated_by: user.user_id,
+                    });
+                    navigate(`/reports/${res.data.report_id}`);
+                  } catch (err) {
+                    alert(err.response?.data?.detail || "Failed to generate report.");
+                  } finally {
+                    setGeneratingReport(false);
+                  }
+                }}
+              >
+                {generatingReport ? "Generating Report…" : "Generate Report"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

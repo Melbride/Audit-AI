@@ -203,59 +203,75 @@ def extract_docx(file_path: str):
 
 # Read a file from disk into a dataframe based on its extension, cleaning up
 # empty columns, whitespace, and reserved internal columns along the way
-<<<<<<< HEAD
-# Now includes smart header detection for Excel files to handle report-style metadata
-def read_file_to_df(save_path: str, ext: str, sheet_name: str = None, file_type: Optional[str] = None, header_row_index: Optional[int] = None):
-    metadata = {}
-=======
 
-def read_file_to_df(save_path: str, ext: str, sheet_name: str = None):
->>>>>>> cb7cd2f (Add backend and frontend validation updates)
+# Read a file from disk into a dataframe based on its extension.
+# Supports sheet selection, smart header detection, and stored header rows.
+def read_file_to_df(
+    save_path: str,
+    ext: str,
+    sheet_name: str = None,
+    file_type: Optional[str] = None,
+    header_row_index: Optional[int] = None
+):
+    metadata = {}
+
     if ext == "csv":
-        # Use CSV header detection for files with potential metadata blocks
         if header_row_index is not None:
-            # Use stored header row index directly
-            df = pd.read_csv(save_path, header=header_row_index, dtype=str)
+            df = pd.read_csv(
+                save_path,
+                header=header_row_index,
+                dtype=str
+            )
         else:
-            # Run header detection with file_type context
-            header_row, df, metadata = detect_csv_header(save_path, file_type)
+            header_row, df, metadata = detect_csv_header(
+                save_path,
+                file_type
+            )
+
     elif ext in ["xlsx", "xls"]:
-<<<<<<< HEAD
-        # Use Excel header detection to find actual table header and extract metadata
         if header_row_index is not None:
-            # Use stored header row index and sheet name directly
-            if sheet_name:
-                df = pd.read_excel(save_path, sheet_name=sheet_name, header=header_row_index, dtype=str)
-            else:
-                # If no sheet_name specified, read first sheet
-                df = pd.read_excel(save_path, header=header_row_index, dtype=str, sheet_name=0)
+            df = pd.read_excel(
+                save_path,
+                sheet_name=sheet_name if sheet_name else 0,
+                header=header_row_index,
+                dtype=str
+            )
         else:
-            # Run header detection with file_type context
-            header_row, df, metadata = detect_excel_header(save_path, sheet_name, file_type)
-=======
-        df = pd.read_excel(save_path, dtype=str, sheet_name=sheet_name if sheet_name else 0)
->>>>>>> cb7cd2f (Add backend and frontend validation updates)
+            header_row, df, metadata = detect_excel_header(
+                save_path,
+                sheet_name,
+                file_type
+            )
+
     elif ext == "pdf":
         df, _ = extract_pdf(save_path)
         return df, {}
+
     elif ext == "docx":
         df, _ = extract_docx(save_path)
         return df, {}
+
     else:
         return None, {}
-    
+
     if df is not None:
-        df = df.dropna(axis=1, how='all')
-        df = df.loc[:, ~(df == '').all()]
-        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
-        df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
-<<<<<<< HEAD
-    
+        df = df.dropna(axis=1, how="all")
+        df = df.loc[:, ~(df == "").all()]
+
+        df = df.map(
+            lambda x: x.strip() if isinstance(x, str) else x
+        )
+
+        df = df.drop(
+            columns=[
+                c for c in df.columns
+                if c in RESERVED_INTERNAL_COLUMNS
+            ],
+            errors="ignore"
+        )
+
     return df, metadata
 
-=======
-    return df
->>>>>>> cb7cd2f (Add backend and frontend validation updates)
 # Calculate the fraction of non-empty values in each column of a dataframe
 def calculate_fill_rates(df: pd.DataFrame) -> dict:
     fill_rates = {}
@@ -546,12 +562,18 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
     
     try:
-<<<<<<< HEAD
-        df, metadata = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
-=======
-        df = read_file_to_df(save_path, file_ext, sheet_name)
->>>>>>> cb7cd2f (Add backend and frontend validation updates)
-        if df is None:
+
+       df, metadata = read_file_to_df(
+           save_path,
+           file_ext,
+           stored_sheet_name,
+           file_type=file_type,
+           header_row_index=stored_header_row
+) 
+
+       
+
+       if df is None:
             raise HTTPException(status_code=400, detail="Could not read file.")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
@@ -2728,6 +2750,7 @@ def build_report_payload(
     mapping: dict,
     sections_data: dict,
     included_sections: list = None,
+    account_mapping: dict = None,
 ) -> dict:
     """
     The one function that turns "everything we know" into "the report".
@@ -2761,6 +2784,24 @@ def build_report_payload(
     breakdowns = calculate_breakdowns(period_df, mapping)
     monthly_trend = calculate_monthly_trend(period_df, mapping)
     anomalies = detect_anomalies(monthly_trend)
+    financial_statements = None
+    if account_mapping:
+        financial_statements = generate_financial_statements(period_df, mapping, account_mapping)
+        if financial_statements.get("applicable"):
+            financial_statements["financial_ratios"] = calculate_financial_ratios(
+                financial_statements["income_statement"],
+                financial_statements["balance_sheet"],
+            )
+
+    # For ledger-style data (trial balance / general ledger), generic
+    # breakdowns are usually empty — fall back to the account-mapped
+    # statements, same numbers "Generate Analysis" already computed.
+    report_financial_summary = breakdowns
+    if financial_statements and financial_statements.get("applicable"):
+        report_financial_summary = {
+            "financial_statements": financial_statements,
+            "breakdowns": breakdowns,
+        }
 
     try:
         ai_insights = generate_ai_insights(breakdowns, monthly_trend, anomalies)
@@ -2781,7 +2822,7 @@ def build_report_payload(
         "period_start": period_start,
         "period_end": period_end,
         "period_label": period_label,
-        "financial_summary": breakdowns,
+        "financial_summary": report_financial_summary,
         "monthly_trend": monthly_trend,
         "anomalies": anomalies,
         "ai_insights": ai_insights,
@@ -2819,6 +2860,7 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
     payload = build_report_payload(
         req, period_start, period_end, period_label,
         combined_df, mapping, sections_data, dataset["included_sections"],
+        account_mapping=dataset.get("account_mapping"),
     )
 
     # 3. PERSIST — unchanged from before: write reports + report_versions.
@@ -2833,7 +2875,7 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
         (
             report_id, payload["client_id"], payload["engagement_id"], payload["file_id"], payload["report_type"],
             payload["period_start"].date(), payload["period_end"].date(),
-            "draft", version_id, req.generated_by, datetime.utcnow(),
+            "draft", None, req.generated_by, datetime.utcnow(),
         )
     )
     cursor.execute(
@@ -2843,16 +2885,21 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             version_id, report_id, 1,
-            json.dumps(payload["financial_summary"]), json.dumps(payload["ai_insights"]),
+            json.dumps(payload["financial_summary"], default=str),
+            json.dumps(payload["ai_insights"], default=str),
             payload["commentary"],
             json.dumps({
                 "chart_specs": payload["chart_specs"],
                 "monthly_trend": payload["monthly_trend"],
                 "anomalies": payload["anomalies"],
                 "sections_data": payload["sections_data"],
-            }),
+            }, default=str),
             "ai", "draft", datetime.utcnow(),
         )
+    )
+    cursor.execute(
+        "UPDATE reports SET current_version_id = %s WHERE id = %s",
+        (version_id, report_id)
     )
     db.commit()
 
@@ -3290,8 +3337,9 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
     cursor = db.cursor(dictionary=True)
 
     # Get the upload record
-    cursor.execute("SELECT * FROM uploads WHERE file_id = %s AND client_id = %s", (file_id, client_id))
-    upload = cursor.fetchone()
+    cursor.execute("SELECT * FROM uploads WHERE file_id = %s AND client_id = %s", (file_id, client_id))    
+    upload_rows = cursor.fetchall()
+    upload = upload_rows[0] if upload_rows else None
     if not upload:
         # Return a graceful response instead of 404 for deleted/non-existent files
         return {
@@ -3350,6 +3398,7 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
         "SELECT file_type FROM workflow_stages WHERE file_id = %s AND client_id = %s",
         (file_id, client_id)
     )
+    workflow_rows = cursor.fetchall()
     existing_workflow_row = cursor.fetchone()
     if existing_workflow_row:
         file_type = existing_workflow_row["file_type"]
@@ -3381,10 +3430,12 @@ def get_resume_state(file_id: str, client_id: str, db=Depends(get_db)):
 
     # Check cleaned registry
     cursor.execute(
-        "SELECT total_issues, can_proceed, updated_at FROM cleaned_files_registry WHERE file_id = %s AND client_id = %s AND file_type = %s",
+         "SELECT total_issues, can_proceed, updated_at FROM cleaned_files_registry WHERE file_id = %s AND client_id = %s AND file_type = %s",
         (file_id, client_id, file_type)
     )
-    cleaned = cursor.fetchone()
+    cleaned_rows = cursor.fetchall()
+    cleaned = cleaned_rows[0] if cleaned_rows else None
+    
 
     # Check if any corrections exist — tells us the auditor was on CorrectedResultsPage
     cursor.execute(
@@ -3595,15 +3646,15 @@ def validate_engagement_dates(start_date: Optional[str], end_date: Optional[str]
 # Create a new engagement and its selected audit sections
 @app.post("/engagements")
 def create_engagement(e: Engagement, db=Depends(get_db)):
-<<<<<<< HEAD
+
     validate_engagement_dates(e.start_date, e.end_date)
     if not e.sections:
         raise HTTPException(status_code=400, detail="Select at least one audit section for this engagement.")
-=======
+
     validate_engagement_creation(
         db, e.client_id, e.engagement_name, e.financial_year, e.start_date, e.end_date
     )
->>>>>>> cb7cd2f (Add backend and frontend validation updates)
+
     cursor = db.cursor()
     cursor.execute(
         """INSERT INTO engagements (client_id, engagement_name, financial_year, status, start_date, end_date)
@@ -3615,7 +3666,7 @@ def create_engagement(e: Engagement, db=Depends(get_db)):
         cursor.execute("INSERT INTO audit_sections (engagement_id, section_name) VALUES (%s, %s)",
                         (engagement_id, section))
     db.commit()
-<<<<<<< HEAD
+
     return {"engagement_id": engagement_id, "message": "Engagement created with selected audit sections"}
 
 # Update an existing engagement
@@ -3630,7 +3681,7 @@ def update_engagement(engagement_id: int, e: Engagement, db=Depends(get_db)):
     )
     db.commit()
     return {"message": "Engagement updated"}
-=======
+
     return {"engagement_id": engagement_id, "message": "Engagement created with default audit sections"}
 # Update an existing engagement
 @app.put("/engagements/{engagement_id}")
@@ -3646,7 +3697,7 @@ def update_engagement(engagement_id: int, e: Engagement, db=Depends(get_db)):
        )
        db.commit()
        return {"message": "Engagement updated"}
->>>>>>> cb7cd2f (Add backend and frontend validation updates)
+
 
 # Mark an engagement as sent to the client. Only allowed once every section's
 # latest submission is Approved — i.e. the derived status is "Under Review".
@@ -4059,7 +4110,7 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
 
     db.commit()
     if s.status == "Approved":
-<<<<<<< HEAD
+
         progress_by_id = fetch_engagement_progress(db, [sub['engagement_id']])
         progress = progress_by_id.get(sub['engagement_id'], {})
         if progress.get("total_sections", 0) > 0 and progress.get("approved_sections", 0) == progress.get("total_sections", 0):
@@ -4078,9 +4129,9 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
                     (row['user_id'], complete_message, "engagement_ready", sub['engagement_id'])
                 )
             db.commit()
-=======
+
         notify_if_ready_for_final_analysis(db, sub["engagement_id"])
->>>>>>> cb7cd2f (Add backend and frontend validation updates)
+
     return {"message": f"Submission status updated to {s.status}"}
 
 # Delete a submission

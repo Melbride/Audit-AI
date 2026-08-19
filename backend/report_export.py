@@ -22,14 +22,58 @@ EXPORT_DIR = "exports"
 os.makedirs(EXPORT_DIR, exist_ok=True)
 
 
-def metric_label_value(key: str, val):
-    if isinstance(val, dict):
-        label = val.get("label", key.replace("_", " ").title())
-        value = val.get("value", "")
-    else:
-        label = key.replace("_", " ").title()
-        value = val
-    return label, value
+def flatten_financial_summary(fs: dict) -> list[tuple[str, str]]:
+    """
+    Turns financial_summary into a flat list of (label, value) rows for
+    the PDF table / Excel-CSV frame, regardless of which shape it's in:
+      - ledger-style: {"financial_statements": {...}, "breakdowns": {...}}
+      - generic:      {"metric_key": value_or_dict, ...}
+    """
+    statements = fs.get("financial_statements") if isinstance(fs, dict) else None
+
+    if statements and statements.get("applicable"):
+        rows = []
+        bs = statements.get("balance_sheet") or {}
+        rows.append(("Total Assets", bs.get("total_assets", "")))
+        rows.append(("Total Liabilities", bs.get("total_liabilities", "")))
+        rows.append(("Total Equity", bs.get("total_equity", "")))
+        for a in bs.get("assets", []):
+            rows.append((f"Asset: {a.get('account_name')}", a.get("amount", "")))
+        for l in bs.get("liabilities", []):
+            rows.append((f"Liability: {l.get('account_name')}", l.get("amount", "")))
+        for eq in bs.get("equity", []):
+            rows.append((f"Equity: {eq.get('account_name')}", eq.get("amount", "")))
+
+        income = statements.get("income_statement") or {}
+        for r in income.get("revenue", []):
+            rows.append((f"Revenue: {r.get('account_name')}", r.get("amount", "")))
+        for e in income.get("expenses", []):
+            rows.append((f"Expense: {e.get('account_name')}", e.get("amount", "")))
+        if income.get("net_profit") is not None:
+            rows.append(("Net Profit", income.get("net_profit")))
+
+        ratios = statements.get("financial_ratios") or {}
+        for key, val in ratios.items():
+            if isinstance(val, dict):
+                for subkey, subval in val.items():
+                    rows.append((f"{key.replace('_', ' ').title()}: {subkey.replace('_', ' ').title()}", subval))
+            else:
+                rows.append((key.replace("_", " ").title(), val))
+
+        return rows
+
+    # Generic/breakdowns-only shape — flat dict of metrics
+    breakdowns = fs.get("breakdowns") if isinstance(fs, dict) and "breakdowns" in fs else fs
+    rows = []
+    for key, val in (breakdowns or {}).items():
+        if isinstance(val, dict):
+            label = val.get("label", key.replace("_", " ").title())
+            value = val.get("value", "")
+        else:
+            label = key.replace("_", " ").title()
+            value = val
+        rows.append((label, value))
+    return rows
 
 
 def build_pdf(report: dict, version: dict, path: str) -> None:
@@ -47,11 +91,11 @@ def build_pdf(report: dict, version: dict, path: str) -> None:
 
     story.append(Paragraph("Financial Summary", styles["Heading2"]))
     fs = version.get("financial_summary") or {}
-    if fs:
+    flat_rows = flatten_financial_summary(fs)
+    if flat_rows:
         rows = [["Metric", "Value"]]
-        for k, v in fs.items():
-            label, value = metric_label_value(k, v)
-            rows.append([label, str(value)])
+        for label, value in flat_rows:
+            rows.append([label, str(value) if value is not None else "—"])
         table = Table(rows, colWidths=[3 * inch, 2.5 * inch])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F3F4F6")),
@@ -84,7 +128,7 @@ def build_pdf(report: dict, version: dict, path: str) -> None:
 
 def _summary_and_insights_frames(version: dict):
     fs = version.get("financial_summary") or {}
-    rows = [metric_label_value(k, v) for k, v in fs.items()]
+    rows = flatten_financial_summary(fs)
     fs_df = pd.DataFrame(rows, columns=["Metric", "Value"])
 
     insights = version.get("ai_insights") or []

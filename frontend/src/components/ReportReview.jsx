@@ -21,7 +21,8 @@ import {
   approveReport,
   requestReportChanges,
   exportReport,
-  getExportDownloadUrl
+  getExportDownloadUrl,
+  submitReportForApproval
 } from "../services/api";
 import "../styles/ReportReview.css";
 
@@ -208,10 +209,25 @@ export default function ReportReview({ reportId, user }) {
       setSubmittingAction(false);
     }
   };
+const [submittingForApproval, setSubmittingForApproval] = useState(false);
+
+const handleSubmitForApproval = async () => {
+  try {
+    setSubmittingForApproval(true);
+    await submitReportForApproval(reportId);
+    showAlert("success", "Report submitted for approval.");
+    await loadReportDetails();
+  } catch (err) {
+    console.error(err);
+    showAlert("error", err.response?.data?.detail || "Failed to submit for approval.");
+  } finally {
+    setSubmittingForApproval(false);
+  }
+};  
 // Export Report
 const handleExport = async (format) => {
   try {
-    const res = await exportReport(reportId, format);
+    const res = await exportReport(reportId, format, user?.user_id);
 
     const downloadUrl = getExportDownloadUrl(
       res.data.export_id
@@ -287,28 +303,147 @@ const handleExport = async (format) => {
               <TrendingUp size={18} className="text-muted" />
               Financial Summary Metrics
             </h2>
-            {version?.financial_summary && Object.keys(version.financial_summary).length > 0 ? (
+            {version?.financial_summary?.financial_statements?.applicable ? (
+              <>
+                {/* Balance Sheet */}
+                <h3 className="text-[12px] font-semibold uppercase text-slate-500 mb-2">Balance Sheet</h3>
+                <div className="financial-metrics-grid" style={{ marginBottom: "20px" }}>
+                  <div className="metric-card">
+                    <div className="metric-label">Total Assets</div>
+                    <div className="metric-value">
+                      {formatCurrency(version.financial_summary.financial_statements.balance_sheet.total_assets)}
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <div className="metric-label">Total Liabilities</div>
+                    <div className="metric-value">
+                      {formatCurrency(version.financial_summary.financial_statements.balance_sheet.total_liabilities)}
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <div className="metric-label">Total Equity</div>
+                    <div className="metric-value">
+                      {formatCurrency(version.financial_summary.financial_statements.balance_sheet.total_equity)}
+                    </div>
+                  </div>
+                </div>
+
+                {version.financial_summary.financial_statements.balance_sheet.assets.length > 0 && (
+                  <table style={{ width: "100%", fontSize: "13px", marginBottom: "16px", borderCollapse: "collapse" }}>
+                    <tbody>
+                      <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "6px" }}>Assets</td></tr>
+                      {version.financial_summary.financial_statements.balance_sheet.assets.map((a, i) => (
+                        <tr key={`asset-${i}`}>
+                          <td style={{ paddingLeft: "12px" }}>{a.account_name} <span className="text-muted">({a.category})</span></td>
+                          <td style={{ textAlign: "right" }}>{formatCurrency(a.amount)}</td>
+                        </tr>
+                      ))}
+                      {version.financial_summary.financial_statements.balance_sheet.liabilities.length > 0 && (
+                        <>
+                          <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "12px" }}>Liabilities</td></tr>
+                          {version.financial_summary.financial_statements.balance_sheet.liabilities.map((l, i) => (
+                            <tr key={`liability-${i}`}>
+                              <td style={{ paddingLeft: "12px" }}>{l.account_name} <span className="text-muted">({l.category})</span></td>
+                              <td style={{ textAlign: "right" }}>{formatCurrency(l.amount)}</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                      {version.financial_summary.financial_statements.balance_sheet.equity.length > 0 && (
+                        <>
+                          <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "12px" }}>Equity</td></tr>
+                          {version.financial_summary.financial_statements.balance_sheet.equity.map((eq, i) => (
+                            <tr key={`equity-${i}`}>
+                              <td style={{ paddingLeft: "12px" }}>{eq.account_name}</td>
+                              <td style={{ textAlign: "right" }}>{formatCurrency(eq.amount)}</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                )}
+
+                {/* Income Statement */}
+                {(version.financial_summary.financial_statements.income_statement.revenue.length > 0 ||
+                  version.financial_summary.financial_statements.income_statement.expenses.length > 0) && (
+                  <>
+                    <h3 className="text-[12px] font-semibold uppercase text-slate-500 mb-2">Income Statement</h3>
+                    <table style={{ width: "100%", fontSize: "13px", marginBottom: "16px", borderCollapse: "collapse" }}>
+                      <tbody>
+                        <tr><td colSpan={2} style={{ fontWeight: 700 }}>Revenue</td></tr>
+                        {version.financial_summary.financial_statements.income_statement.revenue.map((r, i) => (
+                          <tr key={`rev-${i}`}>
+                            <td style={{ paddingLeft: "12px" }}>{r.account_name}</td>
+                            <td style={{ textAlign: "right" }}>{formatCurrency(r.amount)}</td>
+                          </tr>
+                        ))}
+                        <tr><td colSpan={2} style={{ fontWeight: 700, paddingTop: "8px" }}>Expenses</td></tr>
+                        {version.financial_summary.financial_statements.income_statement.expenses.map((e, i) => (
+                          <tr key={`exp-${i}`}>
+                            <td style={{ paddingLeft: "12px" }}>{e.account_name}</td>
+                            <td style={{ textAlign: "right" }}>{formatCurrency(e.amount)}</td>
+                          </tr>
+                        ))}
+                        <tr>
+                          <td style={{ fontWeight: 700, paddingTop: "8px" }}>Net Profit</td>
+                          <td style={{ textAlign: "right", fontWeight: 700, paddingTop: "8px" }}>
+                            {formatCurrency(version.financial_summary.financial_statements.income_statement.net_profit)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </>
+                )}
+
+                {version.financial_summary.financial_statements.financial_ratios && (
+                  <>
+                    <h3 className="text-[12px] font-semibold uppercase text-slate-500 mb-2">Financial Ratios</h3>
+                    <div className="financial-metrics-grid">
+                      {Object.entries(version.financial_summary.financial_statements.financial_ratios).flatMap(([key, val]) => {
+                        if (val && typeof val === "object" && !Array.isArray(val)) {
+                          // Nested category (e.g. { liquidity: { current_ratio: 1.2, ... } })
+                          return Object.entries(val).map(([subKey, subVal]) => (
+                            <div key={`${key}-${subKey}`} className="metric-card">
+                              <div className="metric-label">{subKey.replace(/_/g, " ")}</div>
+                              <div className="metric-value">
+                                {typeof subVal === "number" ? subVal.toFixed(2) : String(subVal)}
+                              </div>
+                            </div>
+                          ));
+                        }
+                        return [
+                          <div key={key} className="metric-card">
+                            <div className="metric-label">{key.replace(/_/g, " ")}</div>
+                            <div className="metric-value">
+                              {typeof val === "number" ? val.toFixed(2) : String(val)}
+                            </div>
+                          </div>
+                        ];
+                      })}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : version?.financial_summary?.breakdowns && Object.keys(version.financial_summary.breakdowns).length > 0 ? (
               <div className="financial-metrics-grid">
-                {Object.entries(version.financial_summary).map(([key, val]) => (
+                {Object.entries(version.financial_summary.breakdowns).map(([key, val]) => (
                   <div key={key} className="metric-card">
-                    <div className="metric-label">{key.replace(/_/g, " ")}</div>
                     <div className="metric-label">
-  {typeof val === "object" ? val.label : key.replace(/_/g, " ")}
-</div>
-
-<div className="metric-value">
-  {typeof val === "object"
-    ? formatCurrency(val.value)
-    : typeof val === "number"
-      ? formatCurrency(val)
-      : val}
-</div>
-
-{typeof val === "object" && (
-  <div className={`metric-delta ${val.up ? "positive" : "negative"}`}>
-    {val.delta}
-  </div>
-)}
+                      {typeof val === "object" ? val.label : key.replace(/_/g, " ")}
+                    </div>
+                    <div className="metric-value">
+                      {typeof val === "object"
+                        ? formatCurrency(val.value)
+                        : typeof val === "number"
+                          ? formatCurrency(val)
+                          : val}
+                    </div>
+                    {typeof val === "object" && (
+                      <div className={`metric-delta ${val.up ? "positive" : "negative"}`}>
+                        {val.delta}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -438,10 +573,27 @@ const handleExport = async (format) => {
                   This report has been approved and cannot be modified further.
                 </p>
               </div>
+            ) : report.current_stage === "draft" ? (
+              <div>
+                <h3 className="font-semibold text-slate-800 text-[14px] mb-3">Review Decisions</h3>
+                <p className="text-muted text-[12px] mb-3">
+                  This report hasn't entered the approval chain yet.
+                </p>
+                <button
+                  className="btn btn-primary w-full"
+                  onClick={handleSubmitForApproval}
+                  disabled={submittingForApproval}
+                >
+                  {submittingForApproval ? "Submitting..." : "Submit for Approval"}
+                </button>
+              </div>
             ) : (
               <div>
                 <h3 className="font-semibold text-slate-800 text-[14px] mb-3">Review Decisions</h3>
-                
+                <p className="text-muted text-[12px] mb-3">
+                  Awaiting {report.current_stage === "pending_audit_manager" ? "Audit Manager" : "Engagement Partner"} approval.
+                </p>
+
                 {actionType ? (
                   <div className="action-form">
                     <p className="text-[12px] font-semibold text-slate-700 mb-1">
