@@ -251,8 +251,8 @@ function CleanPage( ) {
                                 }}
                             >
                                 {(fileType === 'trial_balance' || fileType === 'general_ledger')
-                                    ? 'Proceed to Trial Balance Validation →'
-                                    : 'Proceed to Analysis →'}
+                                    ? 'Proceed to Trial Balance Validation'
+                                    : 'Proceed to Analysis'}
                             </button>
                         </div>
                     </div>

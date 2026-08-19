@@ -511,7 +511,7 @@ function MappingPage() {
                     )}
 
                     <p className="mapping-note">
-                        Unknown columns must be fixed or skipped before saving.
+                        Unknown columns must be fixed before saving.
                     </p>
 
                     {/* File type selector: dropdown of presets, or text input when "Other" is chosen */}
@@ -701,7 +701,7 @@ function MappingPage() {
                     ) : (
                         <div>
                             <div className="success">Mapping saved successfully! You can now proceed.</div>
-                            <button className="btn btn-secondary" onClick={handleProceed}>Proceed to Clean →</button>
+                            <button className="btn btn-secondary" onClick={handleProceed}>Proceed to Clean</button>
                         </div>
                     )}
                 </div>

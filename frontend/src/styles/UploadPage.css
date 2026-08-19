@@ -21,10 +21,10 @@
 .sheet-option {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
+    gap: 10px;
+    padding: 10px 12px;
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s;
     background: var(--background);
@@ -40,14 +40,28 @@
     background: var(--accent-bg);
 }
 
+.sheet-option input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+}
+
 .sheet-option-content {
     flex: 1;
+    min-width: 0;
+    text-align: left;
 }
 
 .sheet-name {
     font-weight: 600;
     color: var(--text);
+    font-size: 13px;
     margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .sheet-meta {
@@ -56,9 +70,11 @@
 }
 
 .sheet-selected-indicator {
+    flex: 0 0 auto;
     color: var(--accent);
-    font-size: 16px;
-    margin-left: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 /* Sheet Preview Styles */
@@ -110,23 +126,23 @@
 
 .card, .preview-card {
     max-width: 100%;
-    margin: 0 auto 4px;
+    margin: 0 auto 16px;
     background: var(--background) !important;
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 6px 12px;
+    padding: 20px 24px;
     box-shadow: none !important;
 }
 
 .title {
     color: var(--text);
-    font-size: 13.5px;
+    font-size: 16px;
     font-weight: 700;
     margin-top: 0; 
-    margin-bottom: 8px;
+    margin-bottom: 20px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .title::before {
@@ -138,7 +154,7 @@
 }
 
 .field {
-    margin-bottom: 8px;
+    margin-bottom: 16px;
 }
 
 .client-field {

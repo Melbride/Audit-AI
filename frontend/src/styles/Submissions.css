@@ -50,8 +50,26 @@
 
 .sub-dropdown-card {
   display: grid;
-  gap: 12px;
+  gap: 16px;
   padding: 16px;
+}
+
+.sub-picker-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: end;
+}
+
+.sub-picker-field {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .sub-picker-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sub-label {
@@ -81,11 +99,10 @@
   box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
 }
 
-.sub-list-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  padding: 16px;
+.sub-list-section {
+  padding-top: 16px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 14px;
 }
@@ -100,30 +117,70 @@
 }
 
 .sub-list-item {
-  padding: 14px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--background);
+}
+
+.sub-item-grid {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px 20px;
 }
 
-.sub-list-item-row {
+.sub-item-field {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.sub-list-item-label {
-  color: var(--text-soft);
+.sub-item-grid .sub-item-field:not(:first-child) {
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+
+.sub-item-label {
+  font-size: 10.5px;
   font-weight: 700;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 
-.sub-list-item-value {
+.sub-item-value {
+  font-size: 13.5px;
+  font-weight: 600;
   color: var(--text);
-  text-align: right;
+}
+
+.sub-item-notes {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-soft);
+  font-style: italic;
+}
+
+@media (max-width: 700px) {
+  .sub-item-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .sub-item-grid .sub-item-field:nth-child(2n+1) {
+    border-left: none;
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .sub-item-grid {
+    grid-template-columns: 1fr;
+  }
+  .sub-item-grid .sub-item-field {
+    border-left: none !important;
+    padding-left: 0 !important;
+  }
 }
 
 .sub-btn-view {

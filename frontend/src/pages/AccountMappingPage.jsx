@@ -346,7 +346,7 @@ function AccountMappingPage() {
                                         })
                                     }}
                                 >
-                                    Proceed to Financial Statements →
+                                    Proceed to Financial Statements 
                                 </button>
                             </div>
                         )}

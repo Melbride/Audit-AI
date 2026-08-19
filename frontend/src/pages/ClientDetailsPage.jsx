@@ -44,7 +44,7 @@ function ClientDetailsPage() {
 
     return (
         <div className="page">
-            <button className="btn-back" onClick={() => navigate('/clients')}>← Back to Clients</button>
+            <button className="btn-back" onClick={() => navigate('/clients')}>Back to Clients</button>
 
             {/* Client profile card */}
             <div className="card">
@@ -53,12 +53,30 @@ function ClientDetailsPage() {
                     <span className={`status-pill ${client.status?.toLowerCase()}`}>{client.status}</span>
                 </div>
                 <div className="client-info-grid">
-                    <div><span className="info-label">Contact:</span> {client.contact_person || '—'}</div>
-                    <div><span className="info-label">Email:</span> {client.email || '—'}</div>
-                    <div><span className="info-label">Phone:</span> {client.phone || '—'}</div>
-                    <div><span className="info-label">Industry:</span> {client.industry || '—'}</div>
-                    <div><span className="info-label">Address:</span> {client.address || '—'}</div>
-                    <div><span className="info-label">KRA PIN:</span> {client.kra_pin ? 'Yes' : 'No'}</div>
+                    <div className="client-info-field">
+                        <span className="info-label">Contact</span>
+                        <span className="info-value">{client.contact_person || '—'}</span>
+                    </div>
+                    <div className="client-info-field">
+                        <span className="info-label">Email</span>
+                        <span className="info-value">{client.email || '—'}</span>
+                    </div>
+                    <div className="client-info-field">
+                        <span className="info-label">Phone</span>
+                        <span className="info-value">{client.phone || '—'}</span>
+                    </div>
+                    <div className="client-info-field">
+                        <span className="info-label">Industry</span>
+                        <span className="info-value">{client.industry || '—'}</span>
+                    </div>
+                    <div className="client-info-field">
+                        <span className="info-label">Address</span>
+                        <span className="info-value">{client.address || '—'}</span>
+                    </div>
+                    <div className="client-info-field">
+                        <span className="info-label">KRA PIN</span>
+                        <span className="info-value">{client.kra_pin ? 'Yes' : 'No'}</span>
+                    </div>
                 </div>
             </div>
 

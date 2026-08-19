@@ -1,5 +1,7 @@
 /* Page */
 
+
+
 .engagement-detail {
   width: 100%;
 }
@@ -410,3 +412,70 @@
   padding: 16px;
   min-height: 100px;
 }
+
+
+/* Engagement Ready for Analysis card */
+
+/* Engagement Ready for Analysis card */
+
+.ready-card {
+  background: var(--info-bg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.ready-card-title {
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.ready-card-copy {
+  color: var(--text-soft);
+  margin-bottom: 12px;
+}
+
+.ready-card .action-btn.secondary {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.ready-card .action-btn.secondary:hover {
+  background: var(--primary);
+  color: var(--background);
+}
+
+/* Compact action button, used for the milestones expand/collapse toggle */
+
+.action-btn.compact {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+/* Expanded row panel (milestones + reviews) */
+
+.expanded-row-cell {
+  background: #F9FAFB;
+  padding: 16px 20px;
+}
+
+.milestones-block {
+  margin-bottom: 16px;
+}
+
+.milestones-heading {
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+
+
+
+

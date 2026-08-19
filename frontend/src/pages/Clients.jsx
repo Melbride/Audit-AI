@@ -122,7 +122,7 @@ export default function Clients({ user }) {
       <div className="cl-header">
         <div>
           <h1 className="cl-title">Clients</h1>
-          <p className="cl-subtitle">Manage client records and view metadata.</p>
+          <p className="cl-subtitle">Manage client records and search for client details.</p>
         </div>
         {canEdit && (
           <button className="cl-add-btn" onClick={openCreate}>Add Client</button>
@@ -137,76 +137,87 @@ export default function Clients({ user }) {
           <p className="cl-empty">No clients yet.</p>
         ) : (
           <div className="cl-client-picker">
-            <div className="cl-picker-row">
-              <label className="cl-form-label" htmlFor="client-search">
-                Search clients
-              </label>
-              <input
-                id="client-search"
-                className="cl-form-input"
-                placeholder="Search by company, contact, email, or phone"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="cl-picker-row">
-              <label className="cl-form-label" htmlFor="client-select">
-                Choose a client
-              </label>
-              <select
-                id="client-select"
-                className="cl-form-select"
-                value={selectedClient?.client_id || ""}
-                onChange={(e) => {
-                  const client = clients.find((c) => String(c.client_id) === e.target.value);
-                  setSelectedClient(client || null);
-                }}
-              >
-                <option value="">Choose a client...</option>
-                {filteredClients.map((c) => (
-                  <option key={c.client_id} value={c.client_id}>
-                    {c.company_name} — {c.contact_person || "No contact"}
-                  </option>
-                ))}
-              </select>
+            <div className="cl-picker-grid">
+              <div className="cl-picker-row">
+                <label className="cl-form-label" htmlFor="client-search">
+                  Search clients
+                </label>
+                <input
+                  id="client-search"
+                  className="cl-form-input"
+                  placeholder="Search by company, contact, email, or phone"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="cl-picker-row">
+                <label className="cl-form-label" htmlFor="client-select">
+                  Choose a client
+                </label>
+                <select
+                  id="client-select"
+                  className="cl-form-select"
+                  value={selectedClient?.client_id || ""}
+                  onChange={(e) => {
+                    const client = clients.find((c) => String(c.client_id) === e.target.value);
+                    setSelectedClient(client || null);
+                  }}
+                >
+                  <option value="">Choose a client...</option>
+                  {filteredClients.map((c) => (
+                    <option key={c.client_id} value={c.client_id}>
+                      {c.company_name} — {c.contact_person || "No contact"}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             {filteredClients.length === 0 && (
               <p className="cl-empty">No clients match your search.</p>
             )}
 
-            {selectedClient ? (
+            {selectedClient && (
               <div className="cl-detail-card">
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">Company</span>
-                  <span>{selectedClient.company_name || "—"}</span>
-                </div>
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">Contact</span>
-                  <span>{selectedClient.contact_person || "—"}</span>
-                </div>
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">Email</span>
-                  <span>{selectedClient.email || "—"}</span>
-                </div>
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">Phone</span>
-                  <span>{selectedClient.phone || "—"}</span>
-                </div>
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">Industry</span>
-                  <span>{selectedClient.industry || "—"}</span>
-                </div>
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">Address</span>
-                  <span>{selectedClient.address || "—"}</span>
-                </div>
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">Status</span>
-                  <span>{selectedClient.status || "Unknown"}</span>
-                </div>
-                <div className="cl-detail-row">
-                  <span className="cl-detail-label">KRA PIN</span>
-                  <span>{selectedClient.kra_pin ? selectedClient.kra_pin_number || "Yes" : "No"}</span>
+                <div className="cl-detail-grid">
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">Company</span>
+                    <span className="cl-detail-value">{selectedClient.company_name || "—"}</span>
+                  </div>
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">Contact</span>
+                    <span className="cl-detail-value">{selectedClient.contact_person || "—"}</span>
+                  </div>
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">Email</span>
+                    <span className="cl-detail-value">{selectedClient.email || "—"}</span>
+                  </div>
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">Phone</span>
+                    <span className="cl-detail-value">{selectedClient.phone || "—"}</span>
+                  </div>
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">Industry</span>
+                    <span className="cl-detail-value">{selectedClient.industry || "—"}</span>
+                  </div>
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">Address</span>
+                    <span className="cl-detail-value">{selectedClient.address || "—"}</span>
+                  </div>
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">Status</span>
+                    <span className={`cl-detail-value ${selectedClient.status === "Active" ? "cl-value-active" : "cl-value-inactive"}`}>
+                      {selectedClient.status || "Unknown"}
+                    </span>
+                  </div>
+                  <div className="cl-detail-field">
+                    <span className="cl-detail-label">KRA PIN</span>
+                    <span className="cl-detail-value">{selectedClient.kra_pin ? selectedClient.kra_pin_number || "Yes" : "No"}</span>
+                  </div>
+                  <div className="cl-detail-field cl-detail-field--action">
+                    <button type="button" className="cl-btn-view" onClick={() => navigate(`/clients/${selectedClient.client_id}`)}>
+                      View
+                    </button>
+                  </div>
                 </div>
                 {canEdit && (
                   <div className="cl-detail-actions">
@@ -216,23 +227,9 @@ export default function Clients({ user }) {
                     <button type="button" className="cl-btn-delete" onClick={() => handleDelete(selectedClient)}>
                       Delete
                     </button>
-                    <button type="button" className="cl-btn-view" onClick={() => navigate(`/clients/${selectedClient.client_id}`)}>
-                      View
-                    </button>
-                  </div>
-                )}
-                {!canEdit && (
-                  <div className="cl-detail-actions">
-                    <button type="button" className="cl-btn-view" onClick={() => navigate(`/clients/${selectedClient.client_id}`)}>
-                      View
-                    </button>
                   </div>
                 )}
               </div>
-            ) : (
-              filteredClients.length > 0 && (
-                <p className="cl-empty">Select a client to view their details.</p>
-              )
             )}
           </div>
         )}

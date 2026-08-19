@@ -1,13 +1,4 @@
-/* ═══════════════════════════════════════════════════════════
-   Financial Statements Page — self-contained styles
-   (uses shared tokens from App.css: --background, --text,
-   --text-soft, --primary, --border, --surface-hover, --transition)
-   All state is communicated through weight/icon/border only —
-   no tinted card backgrounds, so nothing reads as a color-coded
-   "AI dashboard" widget. The one exception is a genuine error,
-   which keeps a red accent because that's a usability need, not
-   decoration.
-   ═══════════════════════════════════════════════════════════ */
+
 .fs-page {
   --tone-danger: #c0392b;
 
@@ -41,7 +32,7 @@
   gap: var(--space-3);
 }
 
-/* ── Cards ─────────────────────────────────────────────────── */
+/* Cards */
 .fs-page .card-clean-body,
 .fs-page .relative-card {
   background: var(--background);
@@ -51,7 +42,7 @@
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
-/* ── Titles ────────────────────────────────────────────────── */
+/* Titles */
 .fs-page .title {
   margin: 0;
   color: var(--text);
@@ -71,7 +62,7 @@
 .fs-hero .title { font-size: 18px; letter-spacing: -0.01em; }
 .fs-hero .title::before { display: none; }
 
-/* ── Hero ──────────────────────────────────────────────────── */
+/* Hero */
 .fs-hero-top {
   display: flex;
   justify-content: space-between;
@@ -96,7 +87,7 @@
   max-width: 760px;
 }
 
-/* ── Status badge — one neutral style, no per-state color ──── */
+/* Status badge */
 .tb-badge {
   display: inline-flex;
   align-items: center;
@@ -119,7 +110,7 @@
   border-color: color-mix(in srgb, var(--border) 70%, transparent);
 }
 
-/* ── Meta grid ─────────────────────────────────────────────── */
+/* Meta grid */
 .fs-meta-grid,
 .tb-meta-grid {
   display: grid;
@@ -153,34 +144,37 @@
   white-space: nowrap;
 }
 
-/* ── Workflow stepper — plain breadcrumb line, no per-step
-   card/border/fill. State shown only by weight + a connecting
-   line, so it reads as a UI pattern, not a template widget. ── */
+/* ── Workflow stepper */
 .fs-flow-card {
   padding: var(--space-3) var(--space-5) !important;
 }
-.tb-flow {
+.fs-page .tb-flow {
   display: flex;
   align-items: center;
 }
-.tb-flow-step {
+.fs-page .tb-flow-step {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex: 0 0 auto;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
 }
-.tb-flow-connector {
+.fs-page .tb-flow-connector {
   flex: 1 1 auto;
   height: 1px;
   min-width: var(--space-6);
-  background: var(--border);
+  background: var(--border) !important;
   margin: 0 var(--space-3);
 }
-.tb-flow-number {
+.fs-page .tb-flow-number {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  border: 1.5px solid var(--border);
+  border: 1.5px solid var(--border) !important;
+  background: transparent !important;
   color: var(--text-soft);
   display: inline-flex;
   align-items: center;
@@ -189,29 +183,29 @@
   font-weight: 700;
   flex: 0 0 auto;
 }
-.tb-flow-label {
+.fs-page .tb-flow-label {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-soft);
   white-space: nowrap;
 }
-/* done: quietly resolved — thin border, muted, no fill */
-.tb-flow-step.done .tb-flow-number {
-  border-color: var(--text-soft);
+/* done: quietly resolved */
+.fs-page .tb-flow-step.done .tb-flow-number {
+  border-color: var(--text-soft) !important;
   color: var(--text-soft);
 }
-/* active: the only step that stands out, by weight alone */
-.tb-flow-step.active .tb-flow-number {
-  border-color: var(--text);
+/* active */
+.fs-page .tb-flow-step.active .tb-flow-number {
+  border-color: var(--text) !important;
   border-width: 2px;
   color: var(--text);
 }
-.tb-flow-step.active .tb-flow-label {
+.fs-page .tb-flow-step.active .tb-flow-label {
   color: var(--text);
   font-weight: 700;
 }
 
-/* ── Banners ───────────────────────────────────────────────── */
+/* Banners */
 .fs-banner {
   font-size: 13px;
   font-weight: 500;
@@ -231,7 +225,7 @@
   color: var(--tone-danger);
 }
 
-/* ── Sections ──────────────────────────────────────────────── */
+/* Sections */
 .fs-section-head { display: grid; gap: 2px; margin-bottom: var(--space-2); }
 .breakdown-title {
   font-size: 13px;
@@ -240,7 +234,7 @@
   margin: var(--space-3) 0 var(--space-2);
 }
 
-/* ── Ratios ────────────────────────────────────────────────── */
+/* Ratios */
 .ratio-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -271,8 +265,7 @@
   line-height: 1.15;
 }
 
-/* ── Income statement: Revenue / Expenses side by side ───────
-   Same column layout in both tables so amounts line up. ────── */
+/* Income statement */
 .fs-two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -280,7 +273,7 @@
   align-items: start;
 }
 
-/* ── Tables ────────────────────────────────────────────────── */
+/* Tables */
 .fs-page .table-wrapper {
   overflow-x: auto;
   margin-top: var(--space-1);
@@ -324,8 +317,7 @@
 .fs-page tbody tr:last-child td { border-bottom: none; }
 .fs-page tbody tr:hover { background: var(--surface-hover); }
 
-/* ── Inline notes — one neutral style, wording carries the
-   meaning ("Net Profit" vs "Net Loss") instead of color ────── */
+/* Inline notes */
 .fs-inline-note {
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
@@ -338,7 +330,7 @@
   line-height: 1.5;
 }
 
-/* ── Footer / buttons ──────────────────────────────────────── */
+/* Footer / buttons */
 .fs-footer {
   display: flex;
   align-items: center;
@@ -390,7 +382,7 @@
   transform: none;
 }
 
-/* ── Responsive ────────────────────────────────────────────── */
+/* Responsive */
 @media (max-width: 768px) {
   .fs-page .card-clean-body,
   .fs-page .relative-card { padding: var(--space-3) var(--space-4); }

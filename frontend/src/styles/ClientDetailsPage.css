@@ -7,7 +7,7 @@
   font-weight: 600;
   cursor: pointer;
   padding: 0;
-  margin-bottom: 16px;
+  margin-bottom: 6px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -16,7 +16,7 @@
 
 .btn-back:hover {
   color: var(--accent-hover);
-  text-decoration: underline;
+  /* text-decoration: underline; */
 }
 
 /* Client name + status row */
@@ -24,7 +24,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 /* Status pill */
@@ -51,18 +51,54 @@
 .client-info-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px 24px;
+  gap: 18px 28px;
+  padding-top: 18px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
 }
 
-.client-info-grid div {
-  font-size: 13.5px;
-  color: var(--text-soft);
+/* Fix double-box pattern for table inside card */
+.card .table-wrapper {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.client-info-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.client-info-grid .client-info-field:not(:nth-child(3n+1)) {
+  border-left: 1px solid var(--border);
+  padding-left: 24px;
 }
 
 .info-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-value {
+  font-size: 14px;
   font-weight: 600;
   color: var(--text);
-  margin-right: 4px;
+}
+
+@media (max-width: 900px) {
+  .client-info-grid { grid-template-columns: repeat(2, 1fr); }
+  .client-info-grid .client-info-field {
+    border-left: none;
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .client-info-grid { grid-template-columns: 1fr; }
 }
 
 /* Badge for file status */
@@ -102,24 +138,6 @@
 .btn-small:hover {
   color: var(--accent-hover);
   text-decoration: underline;
-}
-
-/* View button in Clients table */
-.cl-btn-view {
-  background: none;
-  border: none;
-  color: var(--primary);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  margin-left: 12px;
-  padding: 0;
-  transition: color var(--transition);
-}
-
-.cl-btn-view:hover {
-  text-decoration: underline;
-  color: var(--primary-hover);
 }
 
 /* Stage badges */
