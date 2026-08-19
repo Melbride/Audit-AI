@@ -70,44 +70,49 @@ export default function Submissions({ user }) {
         ) : submissions.length === 0 ? (
           <p className="sub-empty">No submissions yet.</p>
         ) : (
-          <div className="sub-dropdown-card">
-            <label className="sub-label" htmlFor="engagement-search">
-              Search engagements
-            </label>
-            <input
-              id="engagement-search"
-              className="sub-input"
-              type="search"
-              placeholder="Filter by engagement name"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-
-            <label className="sub-label" htmlFor="engagement-select">
-              Select engagement
-            </label>
-            <select
-              id="engagement-select"
-              className="sub-select"
-              value={selectedEngagementId}
-              onChange={(e) => setSelectedEngagementId(e.target.value)}
-            >
-              <option value="">— Choose an engagement —</option>
-              {filteredEngagementOptions.length === 0 ? (
-                <option value="" disabled>
-                  No engagements match your search
-                </option>
-              ) : (
-                filteredEngagementOptions.map((option) => (
-                  <option key={option.engagement_id} value={option.engagement_id}>
-                    {option.engagement_name}
-                  </option>
-                ))
-              )}
-            </select>
+         <div className="sub-dropdown-card">
+            <div className="sub-picker-grid">
+              <div className="sub-picker-field">
+                <label className="sub-label" htmlFor="engagement-search">
+                  Search engagements
+                </label>
+                <input
+                  id="engagement-search"
+                  className="sub-input"
+                  type="search"
+                  placeholder="Filter by engagement name"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="sub-picker-field">
+                <label className="sub-label" htmlFor="engagement-select">
+                  Select engagement
+                </label>
+                <select
+                  id="engagement-select"
+                  className="sub-select"
+                  value={selectedEngagementId}
+                  onChange={(e) => setSelectedEngagementId(e.target.value)}
+                >
+                  <option value="">— Choose an engagement —</option>
+                  {filteredEngagementOptions.length === 0 ? (
+                    <option value="" disabled>
+                      No engagements match your search
+                    </option>
+                  ) : (
+                    filteredEngagementOptions.map((option) => (
+                      <option key={option.engagement_id} value={option.engagement_id}>
+                        {option.engagement_name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            </div>
 
             {selectedEngagementId ? (
-              <div className="sub-list-card">
+              <div className="sub-list-section">
                 <div className="sub-list-header">
                   <span>{selectedSubmissions.length} submission{selectedSubmissions.length === 1 ? "" : "s"} found</span>
                   <button
@@ -120,27 +125,26 @@ export default function Submissions({ user }) {
                 </div>
                 {selectedSubmissions.map((s) => (
                   <div key={s.submission_id} className="sub-list-item">
-                    <div className="sub-list-item-row">
-                      <span className="sub-list-item-label">Section</span>
-                      <span className="sub-list-item-value">{s.section_name || "—"}</span>
-                    </div>
-                    <div className="sub-list-item-row">
-                      <span className="sub-list-item-label">Status</span>
-                      <span className="sub-list-item-value">{s.status}</span>
-                    </div>
-                    <div className="sub-list-item-row">
-                      <span className="sub-list-item-label">Submitted By</span>
-                      <span className="sub-list-item-value">{s.submitted_by_name || "—"}</span>
-                    </div>
-                    <div className="sub-list-item-row">
-                      <span className="sub-list-item-label">Last Updated</span>
-                      <span className="sub-list-item-value">{formatDate(s.created_at)}</span>
+                    <div className="sub-item-grid">
+                      <div className="sub-item-field">
+                        <span className="sub-item-label">Section</span>
+                        <span className="sub-item-value">{s.section_name || "—"}</span>
+                      </div>
+                      <div className="sub-item-field">
+                        <span className="sub-item-label">Status</span>
+                        <span className="sub-item-value">{s.status}</span>
+                      </div>
+                      <div className="sub-item-field">
+                        <span className="sub-item-label">Submitted By</span>
+                        <span className="sub-item-value">{s.submitted_by_name || "—"}</span>
+                      </div>
+                      <div className="sub-item-field">
+                        <span className="sub-item-label">Last Updated</span>
+                        <span className="sub-item-value">{formatDate(s.created_at)}</span>
+                      </div>
                     </div>
                     {s.notes && (
-                      <div className="sub-list-item-row">
-                        <span className="sub-list-item-label">Notes</span>
-                        <span className="sub-list-item-value">"{s.notes}"</span>
-                      </div>
+                      <div className="sub-item-notes">"{s.notes}"</div>
                     )}
                   </div>
                 ))}

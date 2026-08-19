@@ -151,10 +151,10 @@ export default function Engagements({ user }) {
 
   const statusBadgeClass = (status) => {
     const map = {
-      "Planning":    "eng-status-planning",
-      "In Progress": "eng-status-inprogress",
-      "Review":      "eng-status-review",
-      "Completed":   "eng-status-completed",
+      "Planning":     "eng-status-planning",
+      "In Progress":  "eng-status-inprogress",
+      "Under Review": "eng-status-review",
+      "Completed":    "eng-status-completed",
     };
     return map[status] || "eng-status-default";
   };
@@ -164,7 +164,7 @@ export default function Engagements({ user }) {
       <div className="eng-header">
         <div>
           <h1>Engagements</h1>
-          <p>Manage audit engagements and assign teams</p>
+          <p>Manage audit engagements and search for engagement details.</p>
         </div>
         {canCreate && (
           <button onClick={openCreateModal} className="eng-btn-new">New Engagement</button>
@@ -178,7 +178,7 @@ export default function Engagements({ user }) {
           <p className="eng-empty">No engagements yet. Click "New Engagement" to create one.</p>
         ) : (
           <div className="eng-client-picker">
-            <div className="eng-picker-row">
+            <div className="eng-picker-grid">
               <div className="eng-picker-field">
                 <label className="eng-label" htmlFor="engagement-search">
                   Search engagements
@@ -218,31 +218,35 @@ export default function Engagements({ user }) {
               <p className="eng-empty">No engagements match your search.</p>
             )}
 
-            {selectedEngagement ? (
+            {selectedEngagement && (
               <div className="eng-detail-card">
-                <div className="eng-detail-row">
-                  <span className="eng-detail-label">Engagement</span>
-                  <span>{selectedEngagement.engagement_name || "—"}</span>
-                </div>
-                <div className="eng-detail-row">
-                  <span className="eng-detail-label">Client</span>
-                  <span>{selectedEngagement.company_name || "—"}</span>
-                </div>
-                <div className="eng-detail-row">
-                  <span className="eng-detail-label">Financial Year</span>
-                  <span>{selectedEngagement.financial_year || "—"}</span>
-                </div>
-                <div className="eng-detail-row">
-                  <span className="eng-detail-label">Status</span>
-                  <span>{selectedEngagement.display_status || selectedEngagement.status || "Unknown"}</span>
-                </div>
-                <div className="eng-detail-row">
-                  <span className="eng-detail-label">Start Date</span>
-                  <span>{selectedEngagement.start_date || "—"}</span>
-                </div>
-                <div className="eng-detail-row">
-                  <span className="eng-detail-label">End Date</span>
-                  <span>{selectedEngagement.end_date || "—"}</span>
+                <div className="eng-detail-grid">
+                  <div className="eng-detail-field">
+                    <span className="eng-detail-label">Engagement</span>
+                    <span className="eng-detail-value">{selectedEngagement.engagement_name || "—"}</span>
+                  </div>
+                  <div className="eng-detail-field">
+                    <span className="eng-detail-label">Client</span>
+                    <span className="eng-detail-value">{selectedEngagement.company_name || "—"}</span>
+                  </div>
+                  <div className="eng-detail-field">
+                    <span className="eng-detail-label">Financial Year</span>
+                    <span className="eng-detail-value">{selectedEngagement.financial_year || "—"}</span>
+                  </div>
+                  <div className="eng-detail-field">
+                    <span className="eng-detail-label">Status</span>
+                    <span className={`eng-status-pill ${statusBadgeClass(selectedEngagement.display_status || selectedEngagement.status)}`}>
+                      {selectedEngagement.display_status || selectedEngagement.status || "Unknown"}
+                    </span>
+                  </div>
+                  <div className="eng-detail-field">
+                    <span className="eng-detail-label">Start Date</span>
+                    <span className="eng-detail-value">{selectedEngagement.start_date || "—"}</span>
+                  </div>
+                  <div className="eng-detail-field">
+                    <span className="eng-detail-label">End Date</span>
+                    <span className="eng-detail-value">{selectedEngagement.end_date || "—"}</span>
+                  </div>
                 </div>
                 <div className="eng-detail-actions">
                   <button
@@ -254,7 +258,7 @@ export default function Engagements({ user }) {
                   </button>
                 </div>
               </div>
-            ) : null}
+            )}
           </div>
         )}
       </div>

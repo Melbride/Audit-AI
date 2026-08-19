@@ -115,6 +115,23 @@ function TrialBalancePage() {
         }
     }
 
+    const handleProceed = async () => {
+        try {
+            const formData = new FormData()
+            formData.append('file_id', fileId)
+            formData.append('client_id', clientId)
+            formData.append('file_type', fileType || 'general')
+            formData.append('step', 'tb_validation')
+            formData.append('next_stage', 'account_mapping')
+            await completeWorkflowStep(formData)
+        } catch (err) {
+            console.error('Failed to mark workflow step complete:', err)
+        }
+        navigate('/account-mapping', {
+            state: { cleanResult, clientId, uploadResult, fileType }
+        })
+    }
+
     const tbSteps = [
         { label: 'Validate', done: Boolean(result), active: !result },
         { label: 'Correct if needed', done: isBalanced, active: Boolean(result) && !isBalanced },
@@ -124,14 +141,12 @@ function TrialBalancePage() {
     return (
         <div className="page tb-page">
             <div className="header">
-                <h1 className="logo">Audit AI</h1>
-                <p className="subtitle">Financial Intelligence System</p>
+                <h1 className="tb-page-title">Trial Balance Validation</h1>
             </div>
 
             <div className="card tb-shell tb-hero">
                 <div className="tb-hero-top">
                     <div>
-                        <h2 className="title">Trial Balance Validation</h2>
                         <p className="mapping-note tb-hero-copy">
                             This is the checkpoint for the TB. If it is not balanced, stay here and upload the corrected file on this page.
                         </p>
@@ -248,71 +263,44 @@ function TrialBalancePage() {
                         )}
                     </div>
 
-                    {!isBalanced && (
-                        <div className="card tb-shell tb-correction-panel">
-                            <div className="tb-panel-head">
-                                <h2 className="title">Corrected TB</h2>
-                                <p className="mapping-note">
-                                    Upload the corrected file here. You do not need to return to the main Upload page.
-                                </p>
-                            </div>
-
-                            {!showCorrectedUpload ? (
-                                <button className="btn btn-secondary" onClick={() => setShowCorrectedUpload(true)}>
-                                    Upload Corrected TB
-                                </button>
-                            ) : (
-                                <div className="tb-upload-box">
-                                    <input
-                                        className="input"
-                                        type="file"
-                                        accept=".xlsx,.xls,.csv,.pdf,.docx"
-                                        onChange={(e) => setCorrectedFile(e.target.files?.[0] || null)}
-                                    />
-                                    <div className="tb-upload-actions">
-                                        <button className="btn btn-secondary" onClick={handleCorrectedUpload} disabled={correctedUploading || !correctedFile}>
-                                            {correctedUploading ? 'Uploading...' : 'Upload Corrected TB'}
-                                        </button>
-                                        <button className="btn" onClick={() => { setShowCorrectedUpload(false); setCorrectedFile(null); setCorrectedError(null); }}>
-                                            Cancel
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    <div className="card tb-shell tb-proceed-panel">
-                        <div className="tb-proceed-copy">
-                            <h2 className="title">Next Step</h2>
+                    {/* Single "what's next" panel — shows the correction upload while unbalanced,
+                        or the proceed action once the TB is balanced. Never shows both, never shows neither. */}
+                    <div className="card tb-shell tb-next-panel">
+                        <div className="tb-panel-head">
+                            <h2 className="title">{isBalanced ? 'Next Step' : 'Correct the Trial Balance'}</h2>
                             <p className="mapping-note">
                                 {isBalanced
-                                    ? 'Proceed to Account Mapping once the TB is balanced.'
-                                    : 'Proceed remains locked until the TB balances.'}
+                                    ? 'The trial balance is balanced. Proceed to Account Mapping when ready.'
+                                    : 'Upload the corrected file here. You do not need to return to the main Upload page.'}
                             </p>
                         </div>
-                        <button
-                            className="btn btn-proceed"
-                            disabled={!canProceed}
-                            onClick={async () => {
-                                try {
-                                    const formData = new FormData()
-                                    formData.append('file_id', fileId)
-                                    formData.append('client_id', clientId)
-                                    formData.append('file_type', fileType || 'general')
-                                    formData.append('step', 'tb_validation')
-                                    formData.append('next_stage', 'account_mapping')
-                                    await completeWorkflowStep(formData)
-                                } catch (err) {
-                                    console.error('Failed to mark workflow step complete:', err)
-                                }
-                                navigate('/account-mapping', {
-                                    state: { cleanResult, clientId, uploadResult, fileType }
-                                })
-                            }}
-                        >
-                            Proceed to Account Mapping
-                        </button>
+
+                        {isBalanced ? (
+                            <button className="btn" disabled={!canProceed} onClick={handleProceed}>
+                                Proceed to Account Mapping
+                            </button>
+                        ) : !showCorrectedUpload ? (
+                            <button className="btn" onClick={() => setShowCorrectedUpload(true)}>
+                                Upload Corrected TB
+                            </button>
+                        ) : (
+                            <div className="tb-upload-box">
+                                <input
+                                    className="input"
+                                    type="file"
+                                    accept=".xlsx,.xls,.csv,.pdf,.docx"
+                                    onChange={(e) => setCorrectedFile(e.target.files?.[0] || null)}
+                                />
+                                <div className="tb-upload-actions">
+                                    <button className="btn" onClick={handleCorrectedUpload} disabled={correctedUploading || !correctedFile}>
+                                        {correctedUploading ? 'Uploading...' : 'Upload Corrected TB'}
+                                    </button>
+                                    <button className="btn btn-secondary" onClick={() => { setShowCorrectedUpload(false); setCorrectedFile(null); setCorrectedError(null); }}>
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </>
             )}

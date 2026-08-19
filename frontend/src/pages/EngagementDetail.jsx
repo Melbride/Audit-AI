@@ -171,19 +171,11 @@ export default function EngagementDetail({ user }) {
           section is approved. display_status comes from the existing
           backend calculation (apply_display_status) — nothing recalculated here. */}
       {engagement.display_status === "Under Review" && (
-        <div
-          style={{
-            background: "#F0FDF4",
-            border: "1px solid #BBF7D0",
-            borderRadius: "8px",
-            padding: "16px 20px",
-            marginBottom: "20px",
-          }}
-        >
-          <p style={{ fontWeight: 700, color: "#166534", marginBottom: "4px" }}>
+        <div className="ready-card">
+          <p className="ready-card-title">
             Engagement Ready for Analysis
           </p>
-          <p style={{ color: "#166534", marginBottom: "12px" }}>
+          <p className="ready-card-copy">
             All in-scope sections have been completed and approved.
           </p>
           <button
@@ -284,8 +276,7 @@ export default function EngagementDetail({ user }) {
                     {/* Toggle to expand/collapse this section's milestones + review log */}
                     <td>
                       <button
-                        className="action-btn secondary"
-                        style={{ padding: "4px 10px", fontSize: "11px" }}
+                        className="action-btn secondary compact"
                         onClick={() =>
                           setExpandedSection(
                             expandedSection === section.section_id ? null : section.section_id
@@ -314,9 +305,9 @@ export default function EngagementDetail({ user }) {
                   {/* Expanded panel: milestone tracker + review log for this section */}
                   {expandedSection === section.section_id && (
                     <tr>
-                      <td colSpan={5} style={{ background: "#F9FAFB", padding: "16px 20px" }}>
-                        <div style={{ marginBottom: "16px" }}>
-                          <p style={{ fontSize: "11px", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                      <td colSpan={5} className="expanded-row-cell">
+                        <div className="milestones-block">
+                          <p className="milestones-heading">
                             Milestones
                           </p>
                           <SectionMilestones sectionId={section.section_id} user={user} />
