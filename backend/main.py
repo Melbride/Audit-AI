@@ -3,13 +3,20 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, API
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, Literal, List
 
 # Auth-related imports for password hashing and JWT tokens
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+from validators.field_validator import FieldValidator, FieldValidationError
+from contact_validators import validate_kenyan_phone, validate_real_email, validate_password_strength
+from engagement_validators import validate_engagement_creation, validate_engagement_update, validate_engagement_exists, validate_client_exists
+from file_validators import validate_file_submission, validate_selected_sheets
+from section_validators import validate_section_in_engagement_scope
+from error_responses import register_error_handlers, error_detail
+from engagement_notifications import notify_if_ready_for_final_analysis
 
 # File-reading libraries for PDF and DOCX extraction
 import smtplib
@@ -53,6 +60,7 @@ from database import (
     save_analysis, get_saved_analyses, get_saved_analysis, delete_saved_analysis,
     get_saved_analyses_for_engagement, get_saved_analyses_for_file,
     get_or_create_workspace, get_workspace_by_id, update_workspace_data, get_engagement_workspaces, get_user_workspaces,
+    check_all_sections_completed, get_all_sections_data,
     get_workflow_stage, update_workflow_stage, mark_workflow_step_completed, initialize_workflow_stage,
      save_tb_validation_result, clear_tb_validation_result, normalize_mapped_to,
 )
@@ -71,6 +79,7 @@ from engines.financial_reporting.statement_generator import generate_financial_s
 from engines.financial_reporting.financial_ratios import calculate_financial_ratios
 from engines.financial_reporting.financial_analytics import calculate_financial_analytics
 from engines.financial_reporting.comparative_analytics import generate_comparative_analytics
+from validators.date_validator import DateValidator, DateContext, DateValidationError
 # Load environment variables from the .env file
 load_dotenv()
 
@@ -90,6 +99,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Standardized error response shape (Section #9 of the validation doc) —
+# wraps every HTTPException raised anywhere in the app into a consistent
+# {success, error, message, details} body, while keeping the existing
+# `detail` string field so already-shipped frontend pages keep working
+# unchanged. See error_responses.py for the full rationale.
+register_error_handlers(app)
 
 # Initialize the database tables when the app starts up
 @app.on_event("startup")
@@ -187,9 +203,14 @@ def extract_docx(file_path: str):
 
 # Read a file from disk into a dataframe based on its extension, cleaning up
 # empty columns, whitespace, and reserved internal columns along the way
+<<<<<<< HEAD
 # Now includes smart header detection for Excel files to handle report-style metadata
 def read_file_to_df(save_path: str, ext: str, sheet_name: str = None, file_type: Optional[str] = None, header_row_index: Optional[int] = None):
     metadata = {}
+=======
+
+def read_file_to_df(save_path: str, ext: str, sheet_name: str = None):
+>>>>>>> cb7cd2f (Add backend and frontend validation updates)
     if ext == "csv":
         # Use CSV header detection for files with potential metadata blocks
         if header_row_index is not None:
@@ -199,6 +220,7 @@ def read_file_to_df(save_path: str, ext: str, sheet_name: str = None, file_type:
             # Run header detection with file_type context
             header_row, df, metadata = detect_csv_header(save_path, file_type)
     elif ext in ["xlsx", "xls"]:
+<<<<<<< HEAD
         # Use Excel header detection to find actual table header and extract metadata
         if header_row_index is not None:
             # Use stored header row index and sheet name directly
@@ -210,6 +232,9 @@ def read_file_to_df(save_path: str, ext: str, sheet_name: str = None, file_type:
         else:
             # Run header detection with file_type context
             header_row, df, metadata = detect_excel_header(save_path, sheet_name, file_type)
+=======
+        df = pd.read_excel(save_path, dtype=str, sheet_name=sheet_name if sheet_name else 0)
+>>>>>>> cb7cd2f (Add backend and frontend validation updates)
     elif ext == "pdf":
         df, _ = extract_pdf(save_path)
         return df, {}
@@ -223,12 +248,14 @@ def read_file_to_df(save_path: str, ext: str, sheet_name: str = None, file_type:
         df = df.dropna(axis=1, how='all')
         df = df.loc[:, ~(df == '').all()]
         df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
-        # Drop any reserved internal column (e.g. _row_id from a previously
-        # exported workbook re-uploaded by mistake) before it's ever treated as real data
         df = df.drop(columns=[c for c in df.columns if c in RESERVED_INTERNAL_COLUMNS], errors='ignore')
+<<<<<<< HEAD
     
     return df, metadata
 
+=======
+    return df
+>>>>>>> cb7cd2f (Add backend and frontend validation updates)
 # Calculate the fraction of non-empty values in each column of a dataframe
 def calculate_fill_rates(df: pd.DataFrame) -> dict:
     fill_rates = {}
@@ -508,7 +535,7 @@ def adapt_mapping_to_uploaded_headers(mapping: dict, columns: list) -> dict:
 
 # Run a full cleaning cycle for a file: read it from disk, apply saved corrections,
 # run the cleaning engine, filter out acknowledged issues, and compute final counts
-def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: dict):
+def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: dict, sheet_name: str = None):
     save_path, file_ext = locate_uploaded_file(file_id)
     if not save_path:
         raise HTTPException(status_code=404, detail="File not found. Please upload the file first.")
@@ -519,7 +546,11 @@ def run_cleaning_cycle(file_id: str, client_id: str, file_type: str, mapping: di
     stored_sheet_name = upload_record.get('sheet_name') if upload_record else None
     
     try:
+<<<<<<< HEAD
         df, metadata = read_file_to_df(save_path, file_ext, stored_sheet_name, file_type=None, header_row_index=stored_header_row)
+=======
+        df = read_file_to_df(save_path, file_ext, sheet_name)
+>>>>>>> cb7cd2f (Add backend and frontend validation updates)
         if df is None:
             raise HTTPException(status_code=400, detail="Could not read file.")
     except Exception as e:
@@ -608,6 +639,174 @@ def build_financial_analysis_context(cleaned_df: pd.DataFrame, mapping: dict, cl
     })
     return context
 
+def get_engagement_approved_files(engagement_id: int) -> list:
+    """
+    For every in-scope, approved section in this engagement, return the
+    file_id/sheet_name/file_type its latest approved submission points to.
+
+    Returns a list of dicts:
+      { section_id, section_name, file_id, sheet_name, file_type }
+
+    Raises HTTPException(400) if any approved section's file_id no longer
+    resolves to a real uploaded file — better to fail loudly here than
+    silently skip a section's data out of a final analysis.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sec.section_id, sec.section_name, latest.file_id, latest.sheet_name
+        FROM audit_sections sec
+        INNER JOIN (
+            SELECT section_id, file_id, sheet_name, status,
+                   ROW_NUMBER() OVER (PARTITION BY section_id ORDER BY created_at DESC) AS rn
+            FROM submissions
+            WHERE engagement_id = %s
+        ) latest ON latest.section_id = sec.section_id AND latest.rn = 1
+        WHERE sec.engagement_id = %s AND sec.in_scope = 1 AND latest.status = 'Approved'
+    """, (engagement_id, engagement_id))
+    rows = cursor.fetchall()
+
+    for row in rows:
+        # Select both the raw extension (file_type) and the semantic type
+        # (semantic_file_type) -- mappings are saved under the SEMANTIC
+        # type (e.g. 'trial_balance'), not the file extension (e.g. 'csv'),
+        # same distinction get_resume_state() already relies on elsewhere.
+        cursor.execute("SELECT file_type, semantic_file_type FROM uploads WHERE file_id = %s", (row["file_id"],))
+        upload = cursor.fetchone()
+        if not upload:
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Section '{row['section_name']}' is approved but its file "
+                    f"(file_id={row['file_id']}) no longer exists in uploads. "
+                    "Cannot build final analysis until this is resolved."
+                ),
+            )
+        row["file_type"] = upload.get("semantic_file_type") or upload.get("file_type") or "other"
+
+    conn.close()
+    return rows
+
+def get_engagement_combined_dataset(engagement_id: int) -> dict:
+    """
+    THE single source of truth for "what data does this engagement's
+    approved work actually consist of". Both build_engagement_final_analysis
+    (AI Insights) and the report generator call this — never independently —
+    so a report and the final analysis can never show different numbers for
+    the same engagement.
+
+    Gathers every in-scope, approved section's cleaned data and concatenates
+    it into one combined trial balance. Sections that share the same file_id
+    are deduplicated automatically.
+
+    Returns a dict: { combined_df, mapping, account_mapping, file_type,
+    client_id, included_sections }.
+
+    Raises HTTPException(409) if any in-scope section is not yet approved.
+    Raises HTTPException(422) if approved sections' files use inconsistent
+    file_types.
+    """
+    completion = check_all_sections_completed(engagement_id)
+    if not completion["all_completed"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Not all in-scope sections are approved yet.",
+                "pending_sections": completion["pending_sections"],
+                "completed_sections": completion["completed_sections"],
+                "excluded_sections": completion["excluded_sections"],
+            },
+        )
+
+    approved_files = get_engagement_approved_files(engagement_id)
+    if not approved_files:
+        raise HTTPException(status_code=400, detail="No approved, in-scope sections with data found for this engagement.")
+
+    file_types = {f["file_type"] for f in approved_files}
+    if len(file_types) > 1:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Approved sections use inconsistent file types ({', '.join(sorted(file_types))}). "
+                "Final analysis requires all approved section files to be the same type."
+            ),
+        )
+    file_type = file_types.pop()
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT client_id FROM engagements WHERE engagement_id = %s", (engagement_id,))
+    engagement = cursor.fetchone()
+    if not engagement:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Engagement {engagement_id} not found.")
+    client_id = str(engagement["client_id"])
+    conn.close()
+    mapping = get_mapping(client_id, file_type)
+    if not mapping:
+        raise HTTPException(status_code=400, detail=f"No saved column mapping found for client {client_id} / {file_type}.")
+
+    # Dedupe by (file_id, sheet_name) — a shared workbook referenced by
+    # multiple sections is only read and cleaned once.
+    distinct_sources = {}
+    for f in approved_files:
+        key = (f["file_id"], f["sheet_name"])
+        distinct_sources.setdefault(key, []).append(f["section_name"])
+
+    cleaned_frames = []
+    included_sections = []
+    for (file_id, sheet_name), section_names in distinct_sources.items():
+        cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping, sheet_name)
+        cleaned_frames.append(cleaned_df)
+        included_sections.append({
+            "sections": section_names,
+            "file_id": file_id,
+            "sheet_name": sheet_name,
+            "total_issues": report.get("total_issues"),
+        })
+
+    combined_df = pd.concat(cleaned_frames, ignore_index=True)
+    account_mapping = get_account_mapping(client_id, file_type)
+
+    return {
+        "combined_df": combined_df,
+        "mapping": mapping,
+        "account_mapping": account_mapping,
+        "file_type": file_type,
+        "client_id": client_id,
+        "included_sections": included_sections,
+    }
+
+
+def build_engagement_final_analysis(engagement_id: int) -> dict:
+    """
+    Runs the existing (untouched) generate_financial_statements()/
+    generate_financial_ai_insights() pipeline once on this engagement's
+    combined approved dataset (see get_engagement_combined_dataset) — this
+    is the AI Insights consumer of that shared dataset; build_report_payload
+    (below) is the other.
+    """
+    dataset = get_engagement_combined_dataset(engagement_id)
+    combined_df = dataset["combined_df"]
+    mapping = dataset["mapping"]
+
+    financial_statements = generate_financial_statements(combined_df, mapping, dataset["account_mapping"])
+    breakdowns = calculate_breakdowns(combined_df, mapping)
+    monthly_trend = calculate_monthly_trend(combined_df, mapping)
+    anomalies = detect_anomalies(monthly_trend)
+    ai_insights = generate_financial_ai_insights(financial_statements, breakdowns, monthly_trend, anomalies)
+
+    return {
+        "engagement_id": engagement_id,
+        "included_sections": dataset["included_sections"],
+        "financial_statements": financial_statements,
+        "breakdowns": breakdowns,
+        "monthly_trend": monthly_trend,
+        "anomalies": anomalies,
+        "ai_insights": ai_insights,
+    }
+
 # --- Report Generator helpers -----------------------------------------------
 #
 # The Report Generator (Month 3) reuses the same cleaned dataframe and mapping
@@ -653,12 +852,25 @@ def resolve_report_period(req: "ReportGenerateRequest"):
     else:  # custom
         if not req.start_date or not req.end_date:
             raise HTTPException(status_code=400, detail="Custom reports require both 'start_date' and 'end_date'.")
+        
+        # Validate dates using centralized date validator
+        is_valid, error_msg = DateValidator.validate_date_range(
+            req.start_date, req.end_date, input_format="storage"
+        )
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Additional validation for individual dates
+        is_valid, error_msg = DateValidator.is_valid_calendar_date(req.start_date, input_format="storage")
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Start date: {error_msg}")
+        
+        is_valid, error_msg = DateValidator.is_valid_calendar_date(req.end_date, input_format="storage")
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"End date: {error_msg}")
+        
         period_start = pd.to_datetime(req.start_date, errors="coerce")
         period_end = pd.to_datetime(req.end_date, errors="coerce")
-        if pd.isna(period_start) or pd.isna(period_end):
-            raise HTTPException(status_code=400, detail="'start_date' and 'end_date' must be valid dates (YYYY-MM-DD).")
-        if period_start > period_end:
-            raise HTTPException(status_code=400, detail="'start_date' must be on or before 'end_date'.")
         period_label = f"{period_start.strftime('%d %b %Y')} \u2013 {period_end.strftime('%d %b %Y')}"
 
     return period_start, period_end, period_label
@@ -688,12 +900,78 @@ def filter_dataframe_by_period(df: pd.DataFrame, mapping: dict, period_start, pe
 # Describe the charts the frontend dashboard (Month 2) should render for this
 # report, without pre-rendering images here — actual PDF/image chart embedding
 # belongs to the Export System, built separately.
-def build_chart_specs(breakdowns: dict, monthly_trend: list) -> list:
-    return [
-        {"type": "profit_vs_loss", "title": "Profit vs Loss", "source": "financial_summary"},
-        {"type": "revenue_line", "title": "Revenue Trend", "source": "monthly_trend"},
-        {"type": "expense_pie", "title": "Expense Breakdown", "source": "financial_summary.expenses"},
-    ]
+def build_chart_specs(breakdowns: dict, monthly_trend: dict) -> list:
+    """
+    Dynamically generates chart specifications based on available data.
+    Only includes chart types that have corresponding data available,
+    avoiding errors when columns are empty or data is missing.
+    """
+    chart_specs = []
+    
+    # Only add monthly trend charts if we have trend data
+    if monthly_trend and len(monthly_trend) > 0:
+        # Find the first revenue-like trend if available
+        revenue_trend_key = None
+        for key in monthly_trend.keys():
+            if 'revenue' in key.lower() or 'income' in key.lower():
+                revenue_trend_key = key
+                break
+        
+        if revenue_trend_key:
+            chart_specs.append({
+                "type": "revenue_line", 
+                "title": "Revenue Trend", 
+                "source": f"monthly_trend.{revenue_trend_key}"
+            })
+        else:
+            # Fall back to any available trend
+            first_trend_key = list(monthly_trend.keys())[0]
+            chart_specs.append({
+                "type": "trend_line", 
+                "title": f"{first_trend_key.replace('_by_', ' ').replace('_month', '').title()} Trend", 
+                "source": f"monthly_trend.{first_trend_key}"
+            })
+    
+    # Only add breakdown charts if we have breakdown data
+    if breakdowns and len(breakdowns) > 0:
+        # Look for expense-like breakdowns
+        expense_breakdown_key = None
+        for key in breakdowns.keys():
+            if 'expense' in key.lower() or 'cost' in key.lower():
+                expense_breakdown_key = key
+                break
+        
+        if expense_breakdown_key:
+            chart_specs.append({
+                "type": "expense_pie", 
+                "title": "Expense Breakdown", 
+                "source": f"breakdowns.{expense_breakdown_key}"
+            })
+        
+        # Look for revenue/income breakdowns
+        revenue_breakdown_key = None
+        for key in breakdowns.keys():
+            if 'revenue' in key.lower() or 'income' in key.lower():
+                revenue_breakdown_key = key
+                break
+        
+        if revenue_breakdown_key:
+            chart_specs.append({
+                "type": "revenue_bar", 
+                "title": "Revenue Breakdown", 
+                "source": f"breakdowns.{revenue_breakdown_key}"
+            })
+        
+        # If no specific financial breakdowns found, add the first available breakdown
+        if not expense_breakdown_key and not revenue_breakdown_key:
+            first_breakdown_key = list(breakdowns.keys())[0]
+            chart_specs.append({
+                "type": "category_bar", 
+                "title": f"{first_breakdown_key.replace('_by_', ' ').title()}", 
+                "source": f"breakdowns.{first_breakdown_key}"
+            })
+    
+    return chart_specs
 
 # Pydantic model for a client record
 class Client(BaseModel):
@@ -705,6 +983,30 @@ class Client(BaseModel):
     address: Optional[str] = None
     status: Optional[str] = "Active"
     kra_pin: Literal[True, False] = False
+    kra_pin_number: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def phone_must_be_valid_kenyan(cls, v):
+        # Optional field — skip validation entirely if not provided
+        if v is None or not v.strip():
+            return v
+        result = validate_kenyan_phone(v)
+        if not result.valid:
+            raise ValueError(f"Invalid Kenyan phone number: {result.reason}")
+        # Store the normalized +254 format so downstream code never has to
+        # deal with mixed formats (0712..., 254712..., +254712... etc.)
+        return result.e164
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_real(cls, v):
+        if v is None or not v.strip():
+            return v
+        result = validate_real_email(v, check_deliverability=False)
+        if not result.valid:
+            raise ValueError(f"Invalid email address: {result.reason}")
+        return result.normalized
 
 # Pydantic model for creating a user
 class User(BaseModel):
@@ -716,6 +1018,32 @@ class User(BaseModel):
     assigned_client_id: Optional[int] = None
     status: Optional[str] = "Active"
 
+    @field_validator("phone")
+    @classmethod
+    def phone_must_be_valid_kenyan(cls, v):
+        if v is None or not v.strip():
+            return v
+        result = validate_kenyan_phone(v)
+        if not result.valid:
+            raise ValueError(f"Invalid Kenyan phone number: {result.reason}")
+        return result.e164
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_real(cls, v):
+        result = validate_real_email(v, check_deliverability=False)
+        if not result.valid:
+            raise ValueError(f"Invalid email address: {result.reason}")
+        return result.normalized
+
+    @field_validator("password")
+    @classmethod
+    def password_must_be_strong(cls, v):
+        result = validate_password_strength(v)
+        if not result.valid:
+            raise ValueError("Weak password: " + " ".join(result.reasons))
+        return v
+
 # Pydantic model for updating an existing user (no password field)
 class UserUpdate(BaseModel):
     full_name: str
@@ -724,6 +1052,24 @@ class UserUpdate(BaseModel):
     role: Literal["Admin", "Accountant", "Auditor", "Senior Auditor", "Assistant Manager", "Audit Manager", "Engagement Partner", "Quality Reviewer"]
     assigned_client_id: Optional[int] = None
     status: Optional[str] = "Active"
+
+    @field_validator("phone")
+    @classmethod
+    def phone_must_be_valid_kenyan(cls, v):
+        if v is None or not v.strip():
+            return v
+        result = validate_kenyan_phone(v)
+        if not result.valid:
+            raise ValueError(f"Invalid Kenyan phone number: {result.reason}")
+        return result.e164
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_real(cls, v):
+        result = validate_real_email(v, check_deliverability=False)
+        if not result.valid:
+            raise ValueError(f"Invalid email address: {result.reason}")
+        return result.normalized
 
 # Pydantic model for a login request
 class LoginRequest(BaseModel):
@@ -769,16 +1115,24 @@ class AuditSection(BaseModel):
     section_name: str
     status: Optional[str] = "Pending"
     assigned_to: Optional[int] = None
+class SectionScopeUpdate(BaseModel):
+    in_scope: bool
+    scope_reason: Optional[str] = None
+    set_by: int          # user_id of whoever is making the change
+    confirm_override: bool = False   # must be True if section already has an Approved submissions    
 
 # Pydantic model for a submission of work for review
 class Submission(BaseModel):
     engagement_id: int
     section_id: int
     submitted_by: int
+    file_id: str                          # required — every submission must reference an actual uploaded file
+    sheet_name: Optional[str] = None      # set when file_id points to a multi-section workbook
     status: Optional[str] = "Draft"
     current_stage: Optional[str] = "Accountant"
     notes: Optional[str] = None
-
+class SaveFinalAnalysis(BaseModel):
+    saved_by: int
 # Pydantic model for updating a submission's status and workflow stage
 class SubmissionStatus(BaseModel):
     status: Literal["Draft", "Submitted", "Under Review", "Changes Requested", "Approved", "Cancelled"]
@@ -800,7 +1154,12 @@ class Notification(BaseModel):
 class ReportGenerateRequest(BaseModel):
     client_id: int
     engagement_id: int
-    file_id: str
+    # Deprecated: reports now derive their dataset from every approved,
+    # in-scope section (via get_engagement_combined_dataset), the same
+    # source AI Insights uses — not from a single uploaded file. Kept
+    # optional so older frontend calls that still send these don't break;
+    # the values are no longer read by generate_report.
+    file_id: Optional[str] = None
     file_type: Optional[str] = "general"
     report_type: Literal["monthly", "yearly", "custom"]
     year: Optional[int] = None
@@ -1767,6 +2126,44 @@ async def submit_corrected_excel(
             detail="No changes were detected in the uploaded file compared to what was downloaded."
         )
 
+    # Validate each cell correction against its column's declared field_type
+    # before saving anything, same rule as manual inline corrections: reject
+    # bad numeric/date input instead of silently writing it through.
+    if corrections:
+        validation_errors = []
+        for correction in corrections:
+            column = correction.get("column")
+            value = correction.get("corrected_value", "")
+            col_info = mapping.get(column)
+            if not isinstance(col_info, dict):
+                continue
+            field_type = col_info.get("field_type")
+
+            if value is None or str(value).strip() == "":
+                continue
+
+            if field_type == "numeric":
+                try:
+                    FieldValidator.validate_financial_amount(value, field_name=column)
+                except FieldValidationError as e:
+                    validation_errors.append(f"Row {correction.get('row_index')}, '{column}': {e.message}")
+
+            elif field_type == "date":
+                if pd.isna(_parse_flexible_date(str(value))):
+                    validation_errors.append(
+                        f"Row {correction.get('row_index')}, '{column}': "
+                        f"'{value}' is not a valid date."
+                    )
+
+        if validation_errors:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "The uploaded file contains invalid values in one or more cells.",
+                    "errors": validation_errors,
+                },
+            )
+
     # Save plain cell value corrections
     if corrections:
         save_cleaning_corrections(file_id, client_id, file_type, corrections, corrected_by)
@@ -1889,6 +2286,41 @@ async def submit_inline_corrections_endpoint(
         raise HTTPException(status_code=400, detail="Invalid corrections format.")
     if not corrections_list:
         raise HTTPException(status_code=400, detail="No corrections provided.")
+
+    # Validate each correction against its column's declared field_type
+    # before saving — reject bad numeric/date input instead of silently
+    # writing it to the cleaned data.
+    validation_errors = []
+    for correction in corrections_list:
+        column = correction.get("column")
+        value = correction.get("corrected_value", "")
+        col_info = mapping.get(column)
+        if not isinstance(col_info, dict):
+            continue  # unmapped column — nothing to validate against
+        field_type = col_info.get("field_type")
+
+        if value is None or str(value).strip() == "":
+            continue  # clearing a cell is always allowed
+
+        if field_type == "numeric":
+            try:
+                FieldValidator.validate_financial_amount(value, field_name=column)
+            except FieldValidationError as e:
+                validation_errors.append(f"Row {correction.get('row_index')}, '{column}': {e.message}")
+
+        elif field_type == "date":
+            if pd.isna(_parse_flexible_date(str(value))):
+                validation_errors.append(
+                    f"Row {correction.get('row_index')}, '{column}': "
+                    f"'{value}' is not a valid date."
+                )
+
+    if validation_errors:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "One or more corrections are invalid.", "errors": validation_errors},
+        )
+
     save_cleaning_corrections(file_id, client_id, file_type, corrections_list, corrected_by)
     cleaned_df, report = run_cleaning_cycle(file_id, client_id, file_type, mapping)
     return {
@@ -1898,7 +2330,6 @@ async def submit_inline_corrections_endpoint(
         "can_proceed": report.get("can_proceed", False),
         "message": f"{len(corrections_list)} correction(s) saved and re-cleaned."
     }
-
 # List every file for a client that has a cleaned version saved, most recently updated first. Lets the auditor come back later and see what's ready.
 @app.get("/clients/{client_id}/cleaned-files")
 async def list_cleaned_files(client_id: str):
@@ -2003,6 +2434,22 @@ async def standardize_value_endpoint(
             status_code=400,
             detail=f"No rows found with value '{from_value}' in column '{column}'. It may have already been corrected."
         )
+
+    # Validate the replacement value against this column's declared field_type
+    # before applying it to every matching row.
+    field_type = mapping.get(source_col, {}).get("field_type") if isinstance(mapping.get(source_col), dict) else None
+    if to_value and str(to_value).strip():
+        if field_type == "numeric":
+            try:
+                FieldValidator.validate_financial_amount(to_value, field_name=column)
+            except FieldValidationError as e:
+                raise HTTPException(status_code=422, detail=e.message)
+        elif field_type == "date":
+            if pd.isna(_parse_flexible_date(str(to_value))):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"'{to_value}' is not a valid date for column '{column}'.",
+                )
 
     # Create one correction record per affected row
     standardize_records = [
@@ -2214,45 +2661,107 @@ async def generate_financial_statements_endpoint(
         "financial_ratios": result.get("financial_ratios"),
     }
     
+# =============================================================================
+# REFACTORED REPORT GENERATION LOGIC
+# =============================================================================
+# --- Section completion validation ------------------------------------------
 
-# --- Report Generator (Month 3) ---------------------------------------------
-#
-# Turns the Financial Engine + AI Insights Engine output (Month 2) into a
-# saved, period-scoped report: monthly, yearly, or a custom date range.
-# Writes into the versioned schema used by report_routes.py (reports +
-# report_versions), so the report immediately has a v1 that can go through
-# the review/approval workflow (see report_routes.py).
-#
-# Requires the migration in report_routes.py's schema (reports, report_versions,
-# report_approvals, report_exports) PLUS a client_id column on reports:
-#   ALTER TABLE reports ADD COLUMN client_id INT NOT NULL AFTER id;
-#
-# financial_summary/ai_insights/commentary map directly to report_versions
-# columns. monthly_trend and anomalies don't have dedicated columns in the
-# new schema, so they're folded into chart_refs alongside chart_specs —
-# revisit if you want them broken out separately later.
-@app.post("/api/reports/generate")
-def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
-    mapping = get_mapping(req.client_id, req.file_type)
-    if not mapping:
-        raise HTTPException(
-            status_code=400,
-            detail="No saved mapping found for this client. Please complete column mapping first."
+class SectionValidationResult:
+    """
+    Small, explicit result object for a section-completion check, so callers
+    never have to remember the shape of the raw dict from
+    check_all_sections_completed() (e.g. which key means what).
+    """
+    def __init__(self, all_completed: bool, pending_sections: list, sections_data: dict):
+        self.all_completed = all_completed
+        self.pending_sections = pending_sections
+        self.sections_data = sections_data
+
+
+def validate_sections_completed(engagement_id: int) -> SectionValidationResult:
+    """
+    The single source of truth for "is this engagement ready for a report?".
+
+    Uses the existing check_all_sections_completed() DB helper to find out
+    whether every audit section for this engagement has reached a completed
+    state, and get_all_sections_data() to pull the actual section content
+    (real data entered by accountants/auditors — not mock data) so it can be
+    folded into the report later.
+
+    Any endpoint that wants to gate on "all sections done" should call this
+    function rather than querying check_all_sections_completed() directly,
+    so the gating rule lives in exactly one place.
+    """
+    if not engagement_id:
+        # No engagement context at all means there's nothing to validate
+        # against — treat as "not completed" rather than silently passing.
+        return SectionValidationResult(
+            all_completed=False,
+            pending_sections=["No engagement_id provided"],
+            sections_data={},
         )
 
-    cleaned_df, cleaning_report = run_cleaning_cycle(req.file_id, req.client_id, req.file_type, mapping)
-    if not cleaning_report.get("can_proceed", False):
-        raise HTTPException(
-            status_code=400,
-            detail="This file still has unresolved issues. Please finish cleaning before generating a report."
-        )
+    status = check_all_sections_completed(engagement_id)
+    all_completed = bool(status.get("all_completed"))
+    pending_sections = status.get("pending_sections", [])
 
-    period_start, period_end, period_label = resolve_report_period(req)
-    period_df = filter_dataframe_by_period(cleaned_df, mapping, period_start, period_end)
+    # Only pull the actual section data once we know it's worth pulling —
+    # no point querying every section's content for a report we're about
+    # to reject anyway.
+    sections_data = get_all_sections_data(engagement_id) if all_completed else {}
+
+    return SectionValidationResult(
+        all_completed=all_completed,
+        pending_sections=pending_sections,
+        sections_data=sections_data,
+    )
+
+
+# --- Single combined reporting function -------------------------------------
+
+def build_report_payload(
+    req: "ReportGenerateRequest",
+    period_start,
+    period_end,
+    period_label: str,
+    cleaned_df: "pd.DataFrame",
+    mapping: dict,
+    sections_data: dict,
+    included_sections: list = None,
+) -> dict:
+    """
+    The one function that turns "everything we know" into "the report".
+
+    Inputs are the combined, real data from every approved, in-scope
+    section (via get_engagement_combined_dataset — the same source AI
+    Insights uses, so a report and the final analysis can't diverge):
+      - cleaned_df / mapping  -> the combined approved-sections dataset
+      - sections_data         -> the actual completed audit sections for
+                                  this engagement (from get_all_sections_data)
+      - included_sections     -> which sections/files fed this report,
+                                  for the same auditability final analysis has
+      - req                   -> the request parameters (period, commentary, etc.)
+
+    Returns a single dict containing every piece the caller needs both to
+    persist the report (financial_summary / ai_insights / commentary /
+    chart_refs map straight onto report_versions columns) and to return to
+    the client. No other function should independently compute breakdowns,
+    insights, or chart specs for a report — they all happen here so there's
+    exactly one code path producing a report's content.
+    """
+    # Scope the cleaned data to the requested period. Trial balances often
+    # have no date column, so fall back to the full cleaned dataset in that
+    # case — same behavior as before, just kept inside the single builder now.
+    date_col = resolve_mapped_column(mapping, "date")
+    if date_col and date_col in cleaned_df.columns:
+        period_df = filter_dataframe_by_period(cleaned_df, mapping, period_start, period_end)
+    else:
+        period_df = cleaned_df
 
     breakdowns = calculate_breakdowns(period_df, mapping)
     monthly_trend = calculate_monthly_trend(period_df, mapping)
     anomalies = detect_anomalies(monthly_trend)
+
     try:
         ai_insights = generate_ai_insights(breakdowns, monthly_trend, anomalies)
     except Exception as e:
@@ -2260,6 +2769,59 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
 
     chart_specs = build_chart_specs(breakdowns, monthly_trend)
 
+    return {
+        "client_id": req.client_id,
+        "engagement_id": req.engagement_id,
+        # file_id deprecated (a report can now be fed by multiple approved
+        # files) — kept as None for the reports table's existing column,
+        # included_sections below is the real record of what fed this report.
+        "file_id": None,
+        "included_sections": included_sections or [],
+        "report_type": req.report_type,
+        "period_start": period_start,
+        "period_end": period_end,
+        "period_label": period_label,
+        "financial_summary": breakdowns,
+        "monthly_trend": monthly_trend,
+        "anomalies": anomalies,
+        "ai_insights": ai_insights,
+        "chart_specs": chart_specs,
+        # Real, completed-section data — this is what makes the report
+        # reflect the actual engagement rather than just the uploaded file.
+        "sections_data": sections_data,
+        "commentary": req.commentary or "",
+    }
+
+
+# --- Endpoint -----------------------------------------------------------------
+
+@app.post("/api/reports/generate")
+def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
+    # 1. GATHER — the same combined, approved-sections dataset AI Insights
+    #    uses (get_engagement_combined_dataset). This single call replaces
+    #    the old "validate sections, then separately clean one file" flow —
+    #    it raises 409 itself if any in-scope section isn't approved yet,
+    #    and it's the same function final analysis calls, so a report and
+    #    the final analysis can never show different numbers for the same
+    #    engagement.
+    dataset = get_engagement_combined_dataset(req.engagement_id)
+    combined_df = dataset["combined_df"]
+    mapping = dataset["mapping"]
+
+    # Real completed-section content (accountant/auditor notes, statuses)
+    # for display in the report — separate from the financial numbers above.
+    sections_data = get_all_sections_data(req.engagement_id)
+
+    period_start, period_end, period_label = resolve_report_period(req)
+
+    # 2. BUILD — single function combines the combined dataset with the
+    #    completed sections data into the final report content.
+    payload = build_report_payload(
+        req, period_start, period_end, period_label,
+        combined_df, mapping, sections_data, dataset["included_sections"],
+    )
+
+    # 3. PERSIST — unchanged from before: write reports + report_versions.
     report_id = str(uuid.uuid4())
     version_id = str(uuid.uuid4())
 
@@ -2269,8 +2831,8 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
            (id, client_id, engagement_id, file_id, type, period_start, period_end, status, current_version_id, created_by, created_at)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
-            report_id, req.client_id, req.engagement_id, req.file_id, req.report_type,
-            period_start.date(), period_end.date(),
+            report_id, payload["client_id"], payload["engagement_id"], payload["file_id"], payload["report_type"],
+            payload["period_start"].date(), payload["period_end"].date(),
             "draft", version_id, req.generated_by, datetime.utcnow(),
         )
     )
@@ -2281,9 +2843,14 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             version_id, report_id, 1,
-            json.dumps(breakdowns), json.dumps(ai_insights),
-            req.commentary or "",
-            json.dumps({"chart_specs": chart_specs, "monthly_trend": monthly_trend, "anomalies": anomalies}),
+            json.dumps(payload["financial_summary"]), json.dumps(payload["ai_insights"]),
+            payload["commentary"],
+            json.dumps({
+                "chart_specs": payload["chart_specs"],
+                "monthly_trend": payload["monthly_trend"],
+                "anomalies": payload["anomalies"],
+                "sections_data": payload["sections_data"],
+            }),
             "ai", "draft", datetime.utcnow(),
         )
     )
@@ -2291,20 +2858,23 @@ def generate_report(req: ReportGenerateRequest, db=Depends(get_db)):
 
     return {
         "report_id": report_id,
-        "client_id": req.client_id,
-        "engagement_id": req.engagement_id,
-        "report_type": req.report_type,
-        "period_label": period_label,
-        "period_start": period_start.date().isoformat(),
-        "period_end": period_end.date().isoformat(),
-        "financial_summary": breakdowns,
-        "monthly_trend": monthly_trend,
-        "ai_insights": ai_insights,
-        "anomalies": anomalies,
-        "chart_specs": chart_specs,
-        "commentary": req.commentary or "",
-        "message": "Report generated successfully."
+        "client_id": payload["client_id"],
+        "engagement_id": payload["engagement_id"],
+        "report_type": payload["report_type"],
+        "period_label": payload["period_label"],
+        "period_start": payload["period_start"].date().isoformat(),
+        "period_end": payload["period_end"].date().isoformat(),
+        "financial_summary": payload["financial_summary"],
+        "monthly_trend": payload["monthly_trend"],
+        "ai_insights": payload["ai_insights"],
+        "anomalies": payload["anomalies"],
+        "chart_specs": payload["chart_specs"],
+        "sections_data": payload["sections_data"],
+        "included_sections": payload["included_sections"],
+        "commentary": payload["commentary"],
+        "message": "Report generated successfully.",
     }
+
 
 # NOTE: GET /reports/{id}, GET /clients/{id}/reports, PUT /reports/{id}/commentary,
 # and DELETE /reports/{id} moved to report_routes.py under /api/reports —
@@ -2340,7 +2910,8 @@ def fetch_engagement_progress(db, engagement_ids: list) -> dict:
     # Total sections per engagement
     cursor.execute(
         f"SELECT engagement_id, COUNT(*) AS total FROM audit_sections "
-        f"WHERE engagement_id IN ({placeholders}) GROUP BY engagement_id",
+        f"WHERE engagement_id IN ({placeholders}) AND in_scope = 1 "
+        f"GROUP BY engagement_id",
         tuple(engagement_ids)
     )
     for row in cursor.fetchall():
@@ -2420,25 +2991,44 @@ def get_client(client_id: int, db=Depends(get_db)):
     return client
 
 # Create a new client
+ 
 @app.post("/clients")
 def create_client(c: Client, db=Depends(get_db)):
+    try:
+        email = FieldValidator.validate_email(c.email) if c.email else None
+        phone = FieldValidator.validate_phone(c.phone) if c.phone else None
+        kra_pin_number = (
+            FieldValidator.validate_kra_pin(c.kra_pin_number) if c.kra_pin else None
+        )
+    except FieldValidationError as e:
+        raise HTTPException(status_code=422, detail=e.message)
+ 
     cursor = db.cursor()
     cursor.execute(
-        """INSERT INTO clients (company_name, contact_person, email, phone, industry, address, status, kra_pin)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-        (c.company_name, c.contact_person, c.email, c.phone, c.industry, c.address, c.status, c.kra_pin)
+        """INSERT INTO clients (company_name, contact_person, email, phone, industry, address, status, kra_pin, kra_pin_number)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (c.company_name, c.contact_person, email, phone, c.industry, c.address, c.status, c.kra_pin, kra_pin_number)
     )
     db.commit()
     return {"client_id": cursor.lastrowid, "message": "Client created"}
-
 # Update an existing client
+
 @app.put("/clients/{client_id}")
 def update_client(client_id: int, c: Client, db=Depends(get_db)):
+    try:
+        email = FieldValidator.validate_email(c.email) if c.email else None
+        phone = FieldValidator.validate_phone(c.phone) if c.phone else None
+        kra_pin_number = (
+            FieldValidator.validate_kra_pin(c.kra_pin_number) if c.kra_pin else None
+        )
+    except FieldValidationError as e:
+        raise HTTPException(status_code=422, detail=e.message)
+ 
     cursor = db.cursor()
     cursor.execute(
         """UPDATE clients SET company_name=%s, contact_person=%s, email=%s,
-           phone=%s, industry=%s, address=%s, status=%s, kra_pin=%s WHERE client_id=%s""",
-        (c.company_name, c.contact_person, c.email, c.phone, c.industry, c.address, c.status, c.kra_pin, client_id)
+           phone=%s, industry=%s, address=%s, status=%s, kra_pin=%s, kra_pin_number=%s WHERE client_id=%s""",
+        (c.company_name, c.contact_person, email, phone, c.industry, c.address, c.status, c.kra_pin, kra_pin_number, client_id)
     )
     db.commit()
     return {"message": "Client updated"}
@@ -2497,6 +3087,13 @@ def get_user(user_id: int, db=Depends(get_db)):
 # Create a new user with a hashed password
 @app.post("/users")
 def create_user(u: User, db=Depends(get_db)):
+    # A bad assigned_client_id would otherwise surface as a raw MySQL
+    # foreign-key error (1452) — check it up front so the person gets a
+    # clear message instead (e.g. the client was deleted since the
+    # dropdown was last loaded).
+    if u.assigned_client_id is not None:
+        validate_client_exists(db, u.assigned_client_id)
+
     hashed = hash_password(u.password)
     cursor = db.cursor()
     try:
@@ -2507,34 +3104,64 @@ def create_user(u: User, db=Depends(get_db)):
         )
         db.commit()
         return {"user_id": cursor.lastrowid, "message": "User created"}
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = str(e)
         if "Duplicate entry" in error_msg and "email" in error_msg.lower():
-            raise HTTPException(status_code=400, detail="Email already exists")
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail("Email already exists", error_code="CONFLICT", details={"field": "email"}),
+            )
         else:
-            raise HTTPException(status_code=400, detail=f"Failed to create user: {error_msg}")
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail(f"Failed to create user: {error_msg}", error_code="VALIDATION_ERROR"),
+            )
 
 # Update an existing user's details (does not change the password)
 @app.put("/users/{user_id}")
 def update_user(user_id: int, u: UserUpdate, db=Depends(get_db)):
+    # Same check as create_user — a bad assigned_client_id should come
+    # back as a clear 400, not a raw MySQL foreign-key error.
+    if u.assigned_client_id is not None:
+        validate_client_exists(db, u.assigned_client_id)
+
     cursor = db.cursor()
-    cursor.execute(
-        """UPDATE users SET full_name=%s, email=%s, phone=%s,
-           role=%s, assigned_client_id=%s, status=%s WHERE user_id=%s""",
-        (u.full_name, u.email, u.phone, u.role, u.assigned_client_id, u.status, user_id)
-    )
-    db.commit()
-    return {"message": "User updated"}
+    try:
+        cursor.execute(
+            """UPDATE users SET full_name=%s, email=%s, phone=%s,
+               role=%s, assigned_client_id=%s, status=%s WHERE user_id=%s""",
+            (u.full_name, u.email, u.phone, u.role, u.assigned_client_id, u.status, user_id)
+        )
+        db.commit()
+        return {"message": "User updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        if "Duplicate entry" in error_msg and "email" in error_msg.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail("Email already exists", error_code="CONFLICT", details={"field": "email"}),
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail(f"Failed to update user: {error_msg}", error_code="VALIDATION_ERROR"),
+            )
 
 # Reset a user's password
 @app.put("/users/{user_id}/reset-password")
 def reset_user_password(user_id: int, payload: dict, db=Depends(get_db)):
     new_password = payload.get("new_password")
-    if not new_password or len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
-    cursor = db.cursor()
+    try:
+        new_password = FieldValidator.validate_password(new_password)
+    except FieldValidationError as e:
+        raise HTTPException(status_code=422, detail=e.message)
     hashed = hash_password(new_password)
-    cursor.execute("UPDATE users SET password_hash = %s, failed_attempts = 0 WHERE user_id = %s", (hashed, user_id))
+    cursor = db.cursor()
+    cursor.execute("UPDATE users SET password_hash = %s WHERE user_id = %s", (hashed, user_id))
     db.commit()
     return {"message": "Password reset successful"}
 
@@ -2952,6 +3579,7 @@ def get_engagement(engagement_id: int, db=Depends(get_db), current_user: dict = 
     apply_display_status(engagement, progress_by_id.get(engagement_id, {}))
     return engagement
 
+
 # Create a new engagement and automatically create its four default audit sections
 # Checks the audit period is real and start comes before end
 def validate_engagement_dates(start_date: Optional[str], end_date: Optional[str]):
@@ -2967,9 +3595,15 @@ def validate_engagement_dates(start_date: Optional[str], end_date: Optional[str]
 # Create a new engagement and its selected audit sections
 @app.post("/engagements")
 def create_engagement(e: Engagement, db=Depends(get_db)):
+<<<<<<< HEAD
     validate_engagement_dates(e.start_date, e.end_date)
     if not e.sections:
         raise HTTPException(status_code=400, detail="Select at least one audit section for this engagement.")
+=======
+    validate_engagement_creation(
+        db, e.client_id, e.engagement_name, e.financial_year, e.start_date, e.end_date
+    )
+>>>>>>> cb7cd2f (Add backend and frontend validation updates)
     cursor = db.cursor()
     cursor.execute(
         """INSERT INTO engagements (client_id, engagement_name, financial_year, status, start_date, end_date)
@@ -2979,8 +3613,9 @@ def create_engagement(e: Engagement, db=Depends(get_db)):
     engagement_id = cursor.lastrowid
     for section in e.sections:
         cursor.execute("INSERT INTO audit_sections (engagement_id, section_name) VALUES (%s, %s)",
-                       (engagement_id, section))
+                        (engagement_id, section))
     db.commit()
+<<<<<<< HEAD
     return {"engagement_id": engagement_id, "message": "Engagement created with selected audit sections"}
 
 # Update an existing engagement
@@ -2995,6 +3630,23 @@ def update_engagement(engagement_id: int, e: Engagement, db=Depends(get_db)):
     )
     db.commit()
     return {"message": "Engagement updated"}
+=======
+    return {"engagement_id": engagement_id, "message": "Engagement created with default audit sections"}
+# Update an existing engagement
+@app.put("/engagements/{engagement_id}")
+def update_engagement(engagement_id: int, e: Engagement, db=Depends(get_db)):
+       validate_engagement_update(
+           db, engagement_id, e.client_id, e.engagement_name, e.financial_year, e.start_date, e.end_date
+       )
+       cursor = db.cursor()
+       cursor.execute(
+           """UPDATE engagements SET client_id=%s, engagement_name=%s, financial_year=%s,
+              status=%s, start_date=%s, end_date=%s WHERE engagement_id=%s""",
+           (e.client_id, e.engagement_name, e.financial_year, e.status, e.start_date, e.end_date, engagement_id)
+       )
+       db.commit()
+       return {"message": "Engagement updated"}
+>>>>>>> cb7cd2f (Add backend and frontend validation updates)
 
 # Mark an engagement as sent to the client. Only allowed once every section's
 # latest submission is Approved — i.e. the derived status is "Under Review".
@@ -3098,7 +3750,39 @@ def add_audit_section(engagement_id: int, s: AuditSection, db=Depends(get_db)):
     )
     db.commit()
     return {"section_id": cursor.lastrowid, "message": "Audit section added"}
-
+@app.put("/audit-sections/{section_id}/scope")
+def update_section_scope(section_id: int, body: SectionScopeUpdate, db=Depends(get_db)):
+    cursor = db.cursor(dictionary=True)
+ 
+    # Check whether this section already has an approved submission.
+    cursor.execute("""
+        SELECT status FROM submissions
+        WHERE section_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, (section_id,))
+    latest = cursor.fetchone()
+ 
+    if latest and latest["status"] == "Approved" and not body.confirm_override:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This section already has an approved submission. "
+                "Changing its scope will exclude already-reviewed work from "
+                "final analysis and reports. Pass confirm_override=true to proceed."
+            ),
+        )
+ 
+    cursor.execute(
+        """
+        UPDATE audit_sections
+        SET in_scope = %s, scope_reason = %s, scope_set_by = %s, scope_set_at = NOW()
+        WHERE section_id = %s
+        """,
+        (body.in_scope, body.scope_reason, body.set_by, section_id),
+    )
+    db.commit()
+    return {"message": "Section scope updated", "in_scope": body.in_scope}
 # Update an audit section
 @app.put("/audit-sections/{section_id}")
 def update_audit_section(section_id: int, s: AuditSection, db=Depends(get_db)):
@@ -3250,13 +3934,55 @@ def get_submission_review_data(submission_id: int, db=Depends(get_db)):
     return submission
 
 # Create a new submission, and notify the relevant users if it has moved past the first workflow stage
+
 @app.post("/submissions")
 def create_submission(s: Submission, db=Depends(get_db)):
+    # Engagement must actually exist before anything is submitted against it
+    # (doc #4: "Does engagement exist? ✓").
+    validate_engagement_exists(db, s.engagement_id)
+
+    # A submission with no real file behind it can never be analyzed later —
+    # confirm the file_id actually exists before accepting the submission,
+    # rather than storing a reference that turns out to be dead.
+    verify_cursor = db.cursor(dictionary=True)
+    verify_cursor.execute("SELECT file_id, file_type FROM uploads WHERE file_id = %s", (s.file_id,))
+    upload_row = verify_cursor.fetchone()
+    if not upload_row:
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail(
+                f"No uploaded file found with file_id '{s.file_id}'. Upload the file before submitting.",
+                error_code="NOT_FOUND",
+                details={"file_id": s.file_id},
+            ),
+        )
+
+    # Section must belong to this engagement AND currently be in scope
+    # (doc #4: "Is section in scope? ✓") — reject rather than silently
+    # expanding the engagement's scope to cover it.
+    validate_section_in_engagement_scope(db, s.engagement_id, s.section_id)
+
+    # If a specific sheet was named, it must actually exist inside the
+    # uploaded workbook (doc #3: "Verify selected sheets exist in
+    # workbook") — never trust a client-supplied sheet name.
+    if s.sheet_name:
+        file_path, ext = locate_uploaded_file(s.file_id, upload_row.get("file_type"))
+        if not file_path:
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail(
+                    f"Uploaded file '{s.file_id}' could not be located on disk.",
+                    error_code="NOT_FOUND",
+                    details={"file_id": s.file_id},
+                ),
+            )
+        validate_selected_sheets(file_path, ext, [s.sheet_name])
+
     insert_cursor = db.cursor()
     insert_cursor.execute(
-        """INSERT INTO submissions (engagement_id, section_id, submitted_by, status, current_stage, notes)
-           VALUES (%s, %s, %s, %s, %s, %s)""",
-        (s.engagement_id, s.section_id, s.submitted_by, s.status, s.current_stage, s.notes)
+        """INSERT INTO submissions (engagement_id, section_id, submitted_by, file_id, sheet_name, status, current_stage, notes)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (s.engagement_id, s.section_id, s.submitted_by, s.file_id, s.sheet_name, s.status, s.current_stage, s.notes)
     )
     submission_id = insert_cursor.lastrowid
     cursor = db.cursor(dictionary=True)
@@ -3281,7 +4007,7 @@ def create_submission(s: Submission, db=Depends(get_db)):
                 )
     db.commit()
     return {"submission_id": submission_id, "message": "Submission created"}
-
+ 
 # Update a submission's status and workflow stage, and notify the relevant users of the change
 @app.put("/submissions/{submission_id}/status")
 def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends(get_db)):
@@ -3333,6 +4059,7 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
 
     db.commit()
     if s.status == "Approved":
+<<<<<<< HEAD
         progress_by_id = fetch_engagement_progress(db, [sub['engagement_id']])
         progress = progress_by_id.get(sub['engagement_id'], {})
         if progress.get("total_sections", 0) > 0 and progress.get("approved_sections", 0) == progress.get("total_sections", 0):
@@ -3351,6 +4078,9 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
                     (row['user_id'], complete_message, "engagement_ready", sub['engagement_id'])
                 )
             db.commit()
+=======
+        notify_if_ready_for_final_analysis(db, sub["engagement_id"])
+>>>>>>> cb7cd2f (Add backend and frontend validation updates)
     return {"message": f"Submission status updated to {s.status}"}
 
 # Delete a submission
@@ -3468,6 +4198,41 @@ def get_engagement_saved_analyses(engagement_id: int):
 def get_file_saved_analyses(engagement_id: int, file_id: str):
     analyses = get_saved_analyses_for_file(engagement_id, file_id)
     return analyses
+
+# ── Engagement-level final analysis: on-demand, never persists ──────────────
+@app.get("/engagements/{engagement_id}/final-analysis")
+def get_engagement_final_analysis(engagement_id: int, db=Depends(get_db)):
+    return build_engagement_final_analysis(engagement_id)
+
+
+# ── Engagement-level final analysis: explicit save, locks the snapshot ──────
+@app.post("/engagements/{engagement_id}/final-analysis/save")
+def save_engagement_final_analysis(engagement_id: int, body: SaveFinalAnalysis, db=Depends(get_db)):
+    # Recompute rather than trust a client-supplied payload — the saved
+    # snapshot must reflect what's actually approved right now, not
+    # whatever the caller happened to send.
+    result = build_engagement_final_analysis(engagement_id)
+
+    cursor = db.cursor()
+    cursor.execute(
+        """INSERT INTO engagement_final_analysis
+           (engagement_id, saved_by, analysis_data, insights_data, included_sections)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (
+            engagement_id,
+            body.saved_by,
+            json.dumps({
+                "financial_statements": result["financial_statements"],
+                "breakdowns": result["breakdowns"],
+                "monthly_trend": result["monthly_trend"],
+                "anomalies": result["anomalies"],
+            }),
+            json.dumps(result["ai_insights"]),
+            json.dumps(result["included_sections"]),
+        )
+    )
+    db.commit()
+    return {"analysis_id": cursor.lastrowid, "message": "Final analysis saved.", **result}
 
 # Get a specific saved analysis
 @app.get("/saved-analyses/{analysis_id}/view")
@@ -3618,6 +4383,22 @@ def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, 
         fix_cursor = db.cursor()
         fix_cursor.execute("UPDATE auditor_workspaces SET section_id = %s WHERE workspace_id = %s", (section_id, workspace_id))
         db.commit()
+
+    # Section must be in scope for this engagement before any submission is
+    # written or updated against it (doc #4) — same rule as POST /submissions,
+    # applied here since this endpoint is a second real path that writes to
+    # the submissions table.
+    if not section_id:
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail(
+                "No audit section could be resolved for this workspace. "
+                "Please contact your Audit Manager.",
+                error_code="VALIDATION_ERROR",
+                details={"workspace_id": workspace_id, "engagement_id": engagement_id},
+            ),
+        )
+    validate_section_in_engagement_scope(db, engagement_id, section_id)
 
     file_id = ws.get("file_id")
 

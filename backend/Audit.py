@@ -26,6 +26,7 @@ from database import (
     save_cleaning_corrections, get_cleaning_corrections,
     save_fingerprint, get_fingerprint,
     save_cleaning_snapshot, get_cleaning_snapshot,
+    check_all_sections_completed, get_all_sections_data,
 )
 from cleaner import clean_dataframe
 from report_routes import router as report_router

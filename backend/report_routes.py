@@ -6,7 +6,8 @@ database.py), so this shares your app's existing connection handling instead
 of opening its own.
 
 Tables (see schema.sql):
-  reports(id, client_id, type, period_start, period_end, status, current_version_id, created_by, created_at)
+  reports(id, client_id, type, period_start, period_end, status, current_stage,
+          current_version_id, created_by, created_at)
   report_versions(id, report_id, version_number, financial_summary, ai_insights,
                   commentary, chart_refs, generated_by, edited_by, status, created_at)
   report_approvals(id, report_version_id, approver_id, decision, notes, decided_at)
@@ -23,11 +24,27 @@ NOTE: engagement_id and file_id link a report back to the specific
 engagement and uploaded source file it was generated from (previously a
 report was only tied to a client, with no way to tell which engagement or
 which upload produced it). Both are nullable since nothing populates them
-yet — no /generate endpoint exists in this router. Run:
+yet -- no /generate endpoint exists in this router. Run:
   ALTER TABLE reports ADD COLUMN engagement_id INT NULL AFTER client_id;
   ALTER TABLE reports ADD CONSTRAINT fk_reports_engagement
     FOREIGN KEY (engagement_id) REFERENCES engagements(engagement_id);
   ALTER TABLE reports ADD COLUMN file_id VARCHAR(64) NULL AFTER engagement_id;
+
+NOTE: current_stage tracks the report through its staged approval chain,
+replacing the old single-role (Engagement Partner only) approval. Run:
+  ALTER TABLE reports ADD COLUMN current_stage VARCHAR(32) NOT NULL DEFAULT 'draft';
+
+The chain:
+    draft                        (auditor is still working on it)
+      -> pending_audit_manager        (auditor calls /submit-for-approval)
+      -> pending_engagement_partner   (audit manager calls /approve)
+      -> approved                     (engagement partner calls /approve)
+      -> sent_to_client                (engagement partner calls /send-to-client)
+
+request-changes can be called by whichever role currently holds the report
+(same stage-role check as approve) and sends it back to 'draft' with a new
+version, so the auditor's original content and the reviewer's note both
+stay in history.
 
 Wire this into Audit.py with:
 
@@ -43,11 +60,23 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from database import get_db
-from auth import require_role
+from auth import require_role, get_current_user
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
-REPORT_APPROVAL_ROLE = "Engagement Partner"  # same restriction as Send to Client
+# Which role is allowed to act on a report sitting in each stage. A report
+# in 'draft' or 'approved'/'sent_to_client' has no PENDING approval action,
+# so those stages intentionally have no entry here -- see _require_stage_role.
+STAGE_APPROVER_ROLE = {
+    "pending_audit_manager": "Audit Manager",
+    "pending_engagement_partner": "Engagement Partner",
+}
+
+# Which stage a report moves to once its current stage's approver approves it.
+STAGE_NEXT = {
+    "pending_audit_manager": "pending_engagement_partner",
+    "pending_engagement_partner": "approved",
+}
 
 
 # --- Request/response models --------------------------------------------
@@ -81,7 +110,7 @@ def _fetch_current_version(cursor, report_id: str):
 def _fetch_history(cursor, report_id: str):
     """
     Version history, each row enriched with its most recent approval
-    decision (if any) — this is what powers the "notes" shown in the
+    decision (if any) -- this is what powers the "notes" shown in the
     Version History timeline in ReportReview.jsx.
     """
     cursor.execute(
@@ -106,6 +135,42 @@ def _fetch_history(cursor, report_id: str):
     return cursor.fetchall()
 
 
+def _fetch_report_or_404(cursor, report_id: str) -> dict:
+    cursor.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
+    report = cursor.fetchone()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
+def _require_stage_role(current_user: dict, stage: str) -> None:
+    """
+    Confirms current_user's role matches whoever is allowed to act on a
+    report currently sitting in `stage`. This is a manual check (rather
+    than a static Depends(require_role(...))) because the allowed role
+    depends on the report's CURRENT stage, which isn't known until the
+    report is looked up inside the endpoint body.
+
+    Raises 400 if the stage has no pending approval action at all (e.g.
+    'draft' or 'approved' -- nobody is "pending" on those), and 403 if the
+    caller's role doesn't match who the stage is actually waiting on.
+    """
+    expected_role = STAGE_APPROVER_ROLE.get(stage)
+    if expected_role is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Report is in stage '{stage}', which has no pending approval action.",
+        )
+    if current_user.get("role") != expected_role:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"This report is awaiting {expected_role} approval. "
+                f"Your role ({current_user.get('role')}) cannot act on it right now."
+            ),
+        )
+
+
 # --- Endpoints -------------------------------------------------------------
 
 @router.get("")
@@ -128,6 +193,7 @@ def list_reports(
             r.period_start,
             r.period_end,
             r.status,
+            r.current_stage,
             r.created_at,
             u.full_name AS created_by_name,
             rv.version_number
@@ -222,41 +288,87 @@ def update_insights(report_id: str, body: InsightsUpdate, db=Depends(get_db)):
     return {"ok": True}
 
 
+@router.post("/{report_id}/submit-for-approval")
+def submit_report_for_approval(
+    report_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    First step of the approval chain: the auditor moves a draft report out
+    of their own hands and into the Audit Manager's queue. Only works on a
+    report currently sitting in 'draft' -- can't re-submit something
+    that's already in the chain or already sent out.
+    """
+    cursor = db.cursor(dictionary=True)
+    report = _fetch_report_or_404(cursor, report_id)
+    if report["current_stage"] != "draft":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Report is already in stage '{report['current_stage']}', not 'draft'.",
+        )
+
+    write_cursor = db.cursor()
+    write_cursor.execute(
+        "UPDATE reports SET current_stage = 'pending_audit_manager' WHERE id = %s",
+        (report_id,),
+    )
+    db.commit()
+    return {"ok": True, "current_stage": "pending_audit_manager"}
+
+
 @router.post("/{report_id}/approve")
 def approve_report(
     report_id: str,
     body: DecisionRequest,
     db=Depends(get_db),
-    current_user: dict = Depends(require_role(REPORT_APPROVAL_ROLE)),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Approve the current version. Locks it and logs the approval event.
+    """
+    Stage-aware approval -- replaces the old single-role (Engagement
+    Partner only) version of this endpoint. The role required to approve
+    depends on the report's CURRENT stage:
 
-    Restricted to Engagement Partners, same as Send to Client.
+        pending_audit_manager       -> requires Audit Manager
+                                        -> advances to pending_engagement_partner
+        pending_engagement_partner  -> requires Engagement Partner
+                                        -> advances to approved (final)
+
+    Logs every decision in report_approvals regardless of which stage it
+    was made at, so the full chain of who-approved-what is preserved.
     """
     approver_id = current_user["user_id"]
 
     cursor = db.cursor(dictionary=True)
+    report = _fetch_report_or_404(cursor, report_id)
+    _require_stage_role(current_user, report["current_stage"])
+    next_stage = STAGE_NEXT[report["current_stage"]]
+
     version = _fetch_current_version(cursor, report_id)
     if not version:
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail="No current version for this report")
 
-    cursor.execute(
-        "UPDATE report_versions SET status = 'approved' WHERE id = %s",
-        (version["id"],),
-    )
-    cursor.execute(
+    is_final_approval = next_stage == "approved"
+
+    write_cursor = db.cursor()
+    if is_final_approval:
+        write_cursor.execute(
+            "UPDATE report_versions SET status = 'approved' WHERE id = %s",
+            (version["id"],),
+        )
+    write_cursor.execute(
         """
         INSERT INTO report_approvals (id, report_version_id, approver_id, decision, notes, decided_at)
         VALUES (UUID(), %s, %s, 'approved', %s, %s)
         """,
         (version["id"], approver_id, body.notes, datetime.utcnow()),
     )
-    cursor.execute(
-        "UPDATE reports SET status = 'approved' WHERE id = %s",
-        (report_id,),
+    write_cursor.execute(
+        "UPDATE reports SET current_stage = %s, status = %s WHERE id = %s",
+        (next_stage, "approved" if is_final_approval else "draft", report_id),
     )
     db.commit()
-    return {"ok": True, "status": "approved"}
+    return {"ok": True, "current_stage": next_stage}
 
 
 @router.post("/{report_id}/request-changes")
@@ -264,35 +376,42 @@ def request_changes(
     report_id: str,
     body: DecisionRequest,
     db=Depends(get_db),
-    current_user: dict = Depends(require_role(REPORT_APPROVAL_ROLE)),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    Send the current version back for revision. Creates a new draft version
-    (incrementing version_number) so the auditor's note and the prior content
-    both stay in history.
+    Send the current version back for revision. Whichever role currently
+    holds the report (Audit Manager or Engagement Partner, per its current
+    stage) can request changes -- same stage-role check as approve.
 
-    Restricted to Engagement Partners, same as Send to Client.
+    Creates a new draft version (incrementing version_number) so the
+    reviewer's note and the prior content both stay in history, and resets
+    current_stage back to 'draft' so it re-enters the chain from the top
+    once the auditor resubmits it.
     """
     approver_id = current_user["user_id"]
 
     cursor = db.cursor(dictionary=True)
+    report = _fetch_report_or_404(cursor, report_id)
+    _require_stage_role(current_user, report["current_stage"])
+
     version = _fetch_current_version(cursor, report_id)
     if not version:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    cursor.execute(
+    write_cursor = db.cursor()
+    write_cursor.execute(
         """
         INSERT INTO report_approvals (id, report_version_id, approver_id, decision, notes, decided_at)
         VALUES (UUID(), %s, %s, 'changes_requested', %s, %s)
         """,
         (version["id"], approver_id, body.notes, datetime.utcnow()),
     )
-    cursor.execute(
+    write_cursor.execute(
         "UPDATE report_versions SET status = 'changes_requested' WHERE id = %s",
         (version["id"],),
     )
 
-    cursor.execute(
+    write_cursor.execute(
         """
         INSERT INTO report_versions
             (id, report_id, version_number, financial_summary, ai_insights,
@@ -311,9 +430,46 @@ def request_changes(
     )
     new_version_id = cursor.fetchone()["id"]
 
-    cursor.execute(
-        "UPDATE reports SET status = 'draft', current_version_id = %s WHERE id = %s",
+    write_cursor.execute(
+        "UPDATE reports SET status = 'draft', current_stage = 'draft', current_version_id = %s WHERE id = %s",
         (new_version_id, report_id),
     )
     db.commit()
-    return {"ok": True, "status": "changes_requested", "new_version_id": new_version_id}
+    return {"ok": True, "status": "changes_requested", "current_stage": "draft", "new_version_id": new_version_id}
+
+
+@router.post("/{report_id}/send-to-client")
+def send_report_to_client(
+    report_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Final step of the chain: the Engagement Partner sends a fully-approved
+    report out to the client. Only works once current_stage == 'approved'
+    -- a report still anywhere earlier in the chain cannot be sent out.
+    """
+    if current_user.get("role") != "Engagement Partner":
+        raise HTTPException(
+            status_code=403,
+            detail="Only an Engagement Partner can send a report to the client.",
+        )
+
+    cursor = db.cursor(dictionary=True)
+    report = _fetch_report_or_404(cursor, report_id)
+    if report["current_stage"] != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Report must be fully approved before sending to the client "
+                f"(current stage: '{report['current_stage']}')."
+            ),
+        )
+
+    write_cursor = db.cursor()
+    write_cursor.execute(
+        "UPDATE reports SET current_stage = 'sent_to_client' WHERE id = %s",
+        (report_id,),
+    )
+    db.commit()
+    return {"ok": True, "current_stage": "sent_to_client"}

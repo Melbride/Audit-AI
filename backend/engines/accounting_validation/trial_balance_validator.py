@@ -106,21 +106,24 @@ def validate_trial_balance(df: pd.DataFrame, mapping: dict) -> dict:
 
     # Duplicate account codes
     duplicate_issues_before = len(issues)
-    if account_code_col:
+    if account_code_col and account_code_col in df.columns:
         code_counts = df[account_code_col].astype(str).str.strip()
-        duplicated = code_counts[code_counts.duplicated(keep=False) & (code_counts != "")]
-        for code in duplicated.unique():
-            rows = df[code_counts == code].index.tolist()
-            row_numbers = [int(r) + 2 for r in rows]
-            issues.append({
-                "check": "duplicate_account_code",
-                "severity": "medium",
-                "message": (
-                    f"Account code '{code}' appears in multiple rows ({row_numbers}). "
-                    f"Each account should have a unique code, verify these are not "
-                    f"duplicate entries for the same account."
-                ),
-            })
+        # Only check for duplicates if column is not empty
+        if not code_counts.empty and code_counts.nunique() > 0:
+            duplicated = code_counts[code_counts.duplicated(keep=False) & (code_counts != "")]
+            for code in duplicated.unique():
+                rows = df[code_counts == code].index.tolist()
+                row_numbers = [int(r) + 2 for r in rows]
+                issues.append({
+                    "check": "duplicate_account_code",
+                    "severity": "medium",
+                    "message": (
+                        f"Account code '{code}' appears in multiple rows ({row_numbers}). "
+                        f"Each account should have a unique code, verify these are not "
+                        f"duplicate entries for the same account."
+                    ),
+                })
+    # If account_code_col is missing or empty, mark as not applicable rather than fail
     check_duplicates = {
         "name": "Duplicate Account Codes",
         "order": 3,
@@ -129,7 +132,7 @@ def validate_trial_balance(df: pd.DataFrame, mapping: dict) -> dict:
 
     # Missing account names
     missing_name_issues_before = len(issues)
-    if account_name_col:
+    if account_name_col and account_name_col in df.columns:
         missing_names = df[df[account_name_col].isna() | (df[account_name_col].astype(str).str.strip() == "")]
         for idx in missing_names.index:
             issues.append({
@@ -138,6 +141,7 @@ def validate_trial_balance(df: pd.DataFrame, mapping: dict) -> dict:
                 "row": int(idx) + 2,
                 "message": f"Row {int(idx) + 2} is missing an account name. Every account must be identified before proceeding.",
             })
+    # If account_name_col is missing or empty, mark as not applicable rather than fail
     check_missing_names = {
         "name": "Missing Account Names",
         "order": 4,
@@ -145,23 +149,28 @@ def validate_trial_balance(df: pd.DataFrame, mapping: dict) -> dict:
     }
 
     # Negative debit/credit issues still tracked in issues list for detail
-    negative_debits = df[debit_values < 0]
-    for idx in negative_debits.index:
-        issues.append({
-            "check": "negative_debit",
-            "severity": "medium",
-            "row": int(idx) + 2,
-            "message": f"Row {int(idx) + 2} has a negative debit value. This usually indicates an incorrect entry or presentation.",
-        })
+    # Only check if the column exists and has values
+    if debit_col in df.columns and not debit_values.empty:
+        negative_debits = df[debit_values < 0]
+        for idx in negative_debits.index:
+            issues.append({
+                "check": "negative_debit",
+                "severity": "medium",
+                "row": int(idx) + 2,
+                "message": f"Row {int(idx) + 2} has a negative debit value. This usually indicates an incorrect entry or presentation.",
+            })
+    
     # Negative debit/credit issues still tracked in issues list for detail
-    negative_credits = df[credit_values < 0]
-    for idx in negative_credits.index:
-        issues.append({
-            "check": "negative_credit",
-            "severity": "medium",
-            "row": int(idx) + 2,
-            "message": f"Row {int(idx) + 2} has a negative credit value. This usually indicates an incorrect entry or presentation.",
-        })
+    # Only check if the column exists and has values
+    if credit_col in df.columns and not credit_values.empty:
+        negative_credits = df[credit_values < 0]
+        for idx in negative_credits.index:
+            issues.append({
+                "check": "negative_credit",
+                "severity": "medium",
+                "row": int(idx) + 2,
+                "message": f"Row {int(idx) + 2} has a negative credit value. This usually indicates an incorrect entry or presentation.",
+            })
     # Check statuses
     checks = [
         check_required_columns,
