@@ -423,3 +423,24 @@
   .mapping-flow-connector { display: none; }
   .mapping-save-stack { justify-items: stretch; }
 }
+
+.account-hierarchy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-parent {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.account-child {
+  padding-left: 12px;
+}
+
+
+

@@ -21,6 +21,8 @@ STANDARD_ACCOUNT_CATEGORIES = {
     "Long-term Liability": "credit",
     "Share Capital": "credit",
     "Retained Earnings": "credit",
+    "Unrestricted Net Assets": "credit",
+    "Restricted Net Assets": "credit",
     "Revenue": "credit",
     "Other Income": "credit",
     "Cost of Sales": "debit",
@@ -29,27 +31,60 @@ STANDARD_ACCOUNT_CATEGORIES = {
     "Finance Cost": "debit",
 }
 
-# function to classify account names using the LLM and return a mapping of account names to suggested categories
+def infer_category_direction(category: str) -> str | None:
+    """
+    Infers normal balance direction (debit or credit) for standard
+    and custom user categories.
+    """
+    if not category:
+        return None
+        
+    # Check standard dictionary first
+    if category in STANDARD_ACCOUNT_CATEGORIES:
+        return STANDARD_ACCOUNT_CATEGORIES[category]
+        
+    cat_lower = category.lower()
+    
+    # Generic credit indicators
+    credit_keywords = ['asset', 'equity', 'capital', 'retained', 'earning', 'revenue', 'income', 'payable', 'liability', 'reserve', 'fund']
+    debit_keywords = ['cash', 'receivable', 'inventory', 'asset', 'expense', 'cost', 'fee', 'draw', 'loss']
+    
+    if any(k in cat_lower for k in ['payable', 'liability', 'equity', 'capital', 'retained', 'revenue', 'income', 'reserve', 'fund']):
+        return "credit"
+    if any(k in cat_lower for k in ['cash', 'receivable', 'inventory', 'asset', 'expense', 'cost', 'loss']):
+        return "debit"
+        
+    return None
+
+def check_balance_direction_mismatch(account_name: str, category: str, debit_total: float, credit_total: float) -> str | None:
+    """
+    Check if the account's actual debit/credit balance matches what is normally
+    expected for its assigned category (works for custom categories too).
+    """
+    expected_direction = infer_category_direction(category)
+    if expected_direction is None:
+        return None
+        
+    actual_direction = "debit" if debit_total > credit_total else "credit"
+    
+    if actual_direction != expected_direction:
+        return (
+            f"'{account_name}' is classified as '{category}', which usually has a "
+            f"{expected_direction} balance, but this account currently shows a "
+            f"{actual_direction} balance. Please confirm this classification is correct."
+        )
+    return None
+
 def classify_accounts_with_llm(account_names: list) -> dict:
-    """
-    Send the list of unique account names to the LLM and asks it to suggest a standard category for each, 
-    from the fixed list above.
-    Batches requests into chunks to stay within token limits.
-    Returns the account name and the suggested category and Falls back to an empty
-    suggestion for the auditor to manually classify if the LLM fails or returns an invalid category.
-    """
-    # If the list is empty, return an empty dictionary
     if not account_names:
         return {}
     categories_list = list(STANDARD_ACCOUNT_CATEGORIES.keys())
     classification = {}
     
-    # Batch accounts into chunks of 12 to avoid token limit
     batch_size = 12
     for i in range(0, len(account_names), batch_size):
         batch = account_names[i:i + batch_size]
-        # Create a prompt for the LLM to classify the accounts
-        prompt = f""" You are a financial accounting expert helping an audit firm classify accounts.
+        prompt = f"""You are a financial accounting expert helping an audit firm classify accounts.
 Here are the standard financial statement categories to choose from:
 {json.dumps(categories_list)}
 
@@ -65,71 +100,37 @@ Instructions:
 
 EXAMPLE output format:
 {{"Cash at Bank": "Cash & Cash Equivalents", "Sales Revenue": "Revenue", "Mystery Account XYZ": "unknown"}}"""
-        # Send the prompt to the LLM and get the response
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            # The prompt is sent as a system message to the LLM, and the user's message contains the actual prompt text. The temperature is set to 0 for deterministic output, and max_tokens is set to 2000 to allow for a large enough response.
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a financial account classification assistant. You only return valid JSON. No explanations, no markdown, no backticks."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0,
-            max_tokens=2000,
-        )
-        # The LLM's response is expected to be a JSON object mapping account names to categories. We parse this response and update the classification dictionary. If the LLM fails to return valid JSON, we simply skip that batch and continue with the next one.
-        raw = response.choices[0].message.content.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        # Attempt to parse the LLM's response as JSON and update the classification dictionary. If the response is not valid JSON, we ignore it and continue with the next batch.
+
         try:
+            response = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a financial account classification assistant. You only return valid JSON. No explanations, no markdown, no backticks."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0,
+                max_tokens=2000,
+            )
+            raw = response.choices[0].message.content.strip()
+            raw = raw.replace("```json", "").replace("```", "").strip()
             batch_classification = json.loads(raw)
             classification.update(batch_classification)
-        except json.JSONDecodeError:
+        except Exception:
             pass
 
-    # Ensure every account name has SOME entry, defaulting to "unknown" if the LLM failed to classify it
     for name in account_names:
         if name not in classification:
             classification[name] = "unknown"
+            
     return classification
-# Function to check if the account's actual debit/credit balance match what's normally expected for its assigned category
-def check_balance_direction_mismatch(account_name: str, category: str, debit_total: float, credit_total: float) -> str | None:
-    """
-    Check if the account's actual debit/credit balance match what's normally
-    expected for its assigned category
-    """
-    expected_direction = STANDARD_ACCOUNT_CATEGORIES.get(category)
-    if expected_direction is None:
-        return None
-    actual_direction = "debit" if debit_total > credit_total else "credit"
-    # If the actual balance direction does not match the expected direction for the category, return a warning message. Otherwise, return None.
-    if actual_direction != expected_direction:
-        return (
-            f"'{account_name}' is classified as '{category}', which usually has a "
-            f"{expected_direction} balance, but this account currently shows a "
-            f"{actual_direction} balance. Please confirm this classification is correct."
-        )
-    return None
 
-# Function to find near-duplicate account names using fuzzy string similarity
 def find_near_duplicate_accounts(account_names: list) -> list:
-    """
-    Compares every pair of unique account names using fuzzy string
-    similarity, same approach as Cleaning's near-duplicate value check.
-    Flags pairs that are very similar (>=90%) but not identical, since
-    these likely represent the same real account recorded inconsistently
-    (e.g. "Accounts Payable" vs "Accounts Payables"). Excludes pairs that
-    only differ by a trailing number, or where one fully contains the
-    other, since those usually represent genuinely distinct items rather
-    than spelling variants.
-
-    Returns a list of {"account_a": ..., "account_b": ..., "message": ...}
-    """
     SIMILARITY_THRESHOLD = 0.90
     duplicates = []
     already_flagged = set()
@@ -150,10 +151,6 @@ def find_near_duplicate_accounts(account_names: list) -> list:
             if base_a == base_b and val_a != val_b:
                 continue
 
-            # Only skip if the added part looks like a genuinely separate
-            # word/item (more than 3 extra characters), not just a trailing
-            # suffix like pluralization ("Payable" vs "Payables") or a small
-            # typo, which should still be flagged as likely duplicates
             skip_as_distinct = False
             if val_a.lower() in val_b.lower():
                 added_part = val_b.lower().replace(val_a.lower(), "", 1).strip()
@@ -168,31 +165,38 @@ def find_near_duplicate_accounts(account_names: list) -> list:
                 continue
 
             similarity = SequenceMatcher(None, val_a.lower(), val_b.lower()).ratio()
-            if SIMILARITY_THRESHOLD <= similarity < 1.0:
-                duplicates.append({
-                    "account_a": val_a,
-                    "account_b": val_b,
-                    "message": (
-                        f"'{val_a}' and '{val_b}' look like they may be the same "
-                        f"account recorded inconsistently. Consider standardizing "
-                        f"to one name so their balances are combined correctly in "
-                        f"the financial statements."
-                    ),
-                })
-                already_flagged.add(val_a)
-                already_flagged.add(val_b)
+            if not (SIMILARITY_THRESHOLD <= similarity < 1.0):
+                continue
+
+            tokens_a = set(val_a.lower().split())
+            tokens_b = set(val_b.lower().split())
+            only_in_a = tokens_a - tokens_b
+            only_in_b = tokens_b - tokens_a
+            differing = only_in_a | only_in_b
+            if differing and all(len(t) >= 4 for t in differing) and only_in_a and only_in_b:
+                token_pairs_are_typos = any(
+                    SequenceMatcher(None, ta, tb).ratio() >= 0.85
+                    for ta in only_in_a for tb in only_in_b
+                )
+                if not token_pairs_are_typos:
+                    continue
+
+            duplicates.append({
+                "account_a": val_a,
+                "account_b": val_b,
+                "message": (
+                    f"'{val_a}' and '{val_b}' look like they may be the same "
+                    f"account recorded inconsistently. Consider standardizing "
+                    f"to one name so their balances are combined correctly in "
+                    f"the financial statements."
+                ),
+            })
+            already_flagged.add(val_a)
+            already_flagged.add(val_b)
 
     return duplicates
-# Function to build the full account mapping suggestion result
+
 def build_account_mapping_result(df: pd.DataFrame, mapping: dict, saved_account_mapping: dict = None) -> dict:
-    """
-    Builds the full account mapping suggestion result: unique account
-    names, their category (from a saved mapping if one exists, otherwise
-    freshly suggested by the LLM), sample debit/credit totals, and any
-    balance-direction warnings.
-    """
-    # Check if the required columns are mapped in the provided mapping dictionary. If any of the required columns are missing, return a result indicating that the mapping is not applicable and provide a message explaining the issue.
-    # Define alternative names for each target to handle different mapping conventions
     field_alternatives = {
         "account_name": ["account_name", "account_description"],
         "debit": ["debit", "debit_amount"],
@@ -202,17 +206,17 @@ def build_account_mapping_result(df: pd.DataFrame, mapping: dict, saved_account_
     account_name_col = None
     debit_col = None
     credit_col = None
-    # Loop through the mapping dictionary to find the columns that correspond to account_name, debit, and credit (or their alternatives)
+
     for info in mapping.values():
         if isinstance(info, dict):
             mapped_to = info.get("mapped_to")
             if mapped_to in field_alternatives["account_name"]:
-                account_name_col = mapped_to  # Use the actual column name for DataFrame access
+                account_name_col = mapped_to
             elif mapped_to in field_alternatives["debit"]:
-                debit_col = mapped_to  # Use the actual column name for DataFrame access
+                debit_col = mapped_to
             elif mapped_to in field_alternatives["credit"]:
-                credit_col = mapped_to  # Use the actual column name for DataFrame access
-    # Check if all required columns are mapped. If any of them are missing, return a result indicating that the mapping is not applicable and provide a message explaining the issue.
+                credit_col = mapped_to
+
     if not account_name_col or not debit_col or not credit_col:
         return {
             "applicable": False,
@@ -222,24 +226,22 @@ def build_account_mapping_result(df: pd.DataFrame, mapping: dict, saved_account_
             ),
             "accounts": [],
         }
+
     debit_values = pd.to_numeric(df[debit_col], errors="coerce").fillna(0)
     credit_values = pd.to_numeric(df[credit_col], errors="coerce").fillna(0)
 
-    # Group by account name in case the same account appears on multiple rows
     grouped = pd.DataFrame({
         "account_name": df[account_name_col],
         "debit": debit_values,
         "credit": credit_values,
     }).groupby("account_name", as_index=False).sum()
+
     unique_names = grouped["account_name"].tolist()
     saved_account_mapping = saved_account_mapping or {}
 
-    # Only ask the LLM to classify accounts that haven't already been
-    # saved, since we don't want to overwrite the auditor's prior choices
     names_needing_llm = [n for n in unique_names if n not in saved_account_mapping]
     suggestions = classify_accounts_with_llm(names_needing_llm)
 
-    # Build the result list with account details and warnings
     accounts = []
     for _, row in grouped.iterrows():
         name = row["account_name"]
@@ -264,6 +266,7 @@ def build_account_mapping_result(df: pd.DataFrame, mapping: dict, saved_account_
             "previously_confirmed": previously_confirmed,
             "warning_acknowledged": warning_acknowledged,
         })
+
     near_duplicates = find_near_duplicate_accounts(unique_names)
     return {
         "applicable": True,
@@ -272,5 +275,3 @@ def build_account_mapping_result(df: pd.DataFrame, mapping: dict, saved_account_
         "near_duplicate_accounts": near_duplicates,
         "message": f"{len(accounts)} unique account(s) found and classified.",
     }
-
-

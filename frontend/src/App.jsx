@@ -7,7 +7,7 @@ import CleanPage from './pages/CleanPage'
 import AnalysisPage from './pages/AnalysisPage'
 import AnalysisHistory from './pages/AnalysisHistory'
 import CorrectedResultsPage from './pages/CorrectedResultsPage'
-import Insights from './pages/Insights .jsx'
+import Insights from './pages/Insights'
 import TrialBalancePage from './pages/TrialBalancePage'
 import AccountMappingPage from './pages/AccountMappingPage'
 

@@ -178,9 +178,10 @@ def list_reports(
     client_id: Optional[int] = None,
     engagement_id: Optional[int] = None,
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """List reports, optionally filtered to one client and/or one engagement,
-    for the browsable list."""
+    for the browsable list. Filters based on user role."""
     cursor = db.cursor(dictionary=True)
     query = """
         SELECT
@@ -204,12 +205,27 @@ def list_reports(
     """
     conditions = []
     params = []
+    
+    # Role-based filtering
+    user_role = current_user.get("role")
+    user_id = current_user.get("user_id")
+    
+    if user_role == "Audit Manager":
+        conditions.append("r.current_stage = 'pending_audit_manager'")
+    elif user_role == "Engagement Partner":
+        conditions.append("r.current_stage = 'pending_engagement_partner'")
+    elif user_role == "Auditor":
+        conditions.append("r.created_by = %s")
+        params.append(user_id)
+    # Admin sees all reports (no additional filtering)
+    
     if client_id is not None:
         conditions.append("r.client_id = %s")
         params.append(client_id)
     if engagement_id is not None:
         conditions.append("r.engagement_id = %s")
         params.append(engagement_id)
+    
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY r.created_at DESC"
@@ -292,7 +308,7 @@ def update_insights(report_id: str, body: InsightsUpdate, db=Depends(get_db)):
 def submit_report_for_approval(
     report_id: str,
     db=Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_role("Auditor")),
 ):
     """
     First step of the approval chain: the auditor moves a draft report out
@@ -313,6 +329,30 @@ def submit_report_for_approval(
         "UPDATE reports SET current_stage = 'pending_audit_manager' WHERE id = %s",
         (report_id,),
     )
+
+    # Notify Audit Managers assigned to this engagement
+    if report["engagement_id"]:
+        cursor.execute(
+            """
+            SELECT u.user_id, u.full_name 
+            FROM engagement_team et
+            JOIN users u ON et.user_id = u.user_id
+            WHERE et.engagement_id = %s AND et.role = 'Audit Manager'
+            """,
+            (report["engagement_id"],),
+        )
+        audit_managers = cursor.fetchall()
+        for manager in audit_managers:
+            write_cursor.execute(
+                "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                (
+                    manager["user_id"],
+                    f"Report '{report.get('type', 'Report')}' has been submitted for your approval",
+                    "report_approval",
+                    report["engagement_id"],
+                ),
+            )
+
     db.commit()
     return {"ok": True, "current_stage": "pending_audit_manager"}
 
@@ -367,6 +407,30 @@ def approve_report(
         "UPDATE reports SET current_stage = %s, status = %s WHERE id = %s",
         (next_stage, "approved" if is_final_approval else "draft", report_id),
     )
+
+    # Notify next stage approver (Engagement Partner when Audit Manager approves)
+    if report["engagement_id"] and next_stage == "pending_engagement_partner":
+        cursor.execute(
+            """
+            SELECT u.user_id, u.full_name 
+            FROM engagement_team et
+            JOIN users u ON et.user_id = u.user_id
+            WHERE et.engagement_id = %s AND et.role = 'Engagement Partner'
+            """,
+            (report["engagement_id"],),
+        )
+        partners = cursor.fetchall()
+        for partner in partners:
+            write_cursor.execute(
+                "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                (
+                    partner["user_id"],
+                    f"Report '{report.get('type', 'Report')}' has been approved by Audit Manager and awaits your review",
+                    "report_approval",
+                    report["engagement_id"],
+                ),
+            )
+
     db.commit()
     return {"ok": True, "current_stage": next_stage}
 

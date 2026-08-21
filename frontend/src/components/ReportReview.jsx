@@ -31,7 +31,7 @@ const formatCurrency = (val) => {
   if (val === undefined || val === null || isNaN(Number(val))) return "—";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: "KSH",
     maximumFractionDigits: 0
   }).format(val);
 };
@@ -579,13 +579,19 @@ const handleExport = async (format) => {
                 <p className="text-muted text-[12px] mb-3">
                   This report hasn't entered the approval chain yet.
                 </p>
-                <button
-                  className="btn btn-primary w-full"
-                  onClick={handleSubmitForApproval}
-                  disabled={submittingForApproval}
-                >
-                  {submittingForApproval ? "Submitting..." : "Submit for Approval"}
-                </button>
+                {user?.role === "Auditor" ? (
+                  <button
+                    className="btn btn-primary w-full"
+                    onClick={handleSubmitForApproval}
+                    disabled={submittingForApproval}
+                  >
+                    {submittingForApproval ? "Submitting..." : "Submit for Approval"}
+                  </button>
+                ) : (
+                  <p className="text-muted text-[12px]">
+                    Only the report's Auditor can submit it for approval.
+                  </p>
+                )}
               </div>
             ) : (
               <div>

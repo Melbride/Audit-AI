@@ -14,7 +14,7 @@ BOOLEAN_VALUE_GROUPS = [
 
 # Summary row indicators - words that suggest a row is a total/subtotal/summary
 SUMMARY_INDICATORS = {
-    'total', 'subtotal', 'grand total', 'sum', 'net', 'balance', 'closing',
+    'total', 'totals', 'subtotal', 'subtotals', 'grand total', 'sum', 'net', 'balance', 'closing',
     'total assets', 'total liabilities', 'total equity', 'total revenue',
     'total expenses', 'net income', 'gross profit', 'operating profit'
 }
@@ -97,13 +97,19 @@ def is_summary_row(row: pd.Series, mapping: dict, file_type: str = None) -> bool
     is_accounting_file = file_type in ('trial_balance', 'general_ledger')
     
     if is_accounting_file:
-        # Accounting file: Need at least 2 of 3 evidence points
-        evidence_count = sum([
-            has_empty_code,
-            has_summary_indicator,
-            (total_numeric_fields > 0 and numeric_fields_blank_or_zero / total_numeric_fields >= 0.7)
-        ])
-        return evidence_count >= 2
+        # An explicit label ("Totals", "Grand Total") is strong enough on its
+        # own — a row someone actually labeled that way is essentially never
+        # a real account. Requiring a second signal caused real totals rows
+        # to slip through whenever the file has no separate account-code
+        # column (evidence 1 can never fire) or the row is fully populated
+        # with real figures (evidence 3 is backwards in that case).
+        if has_summary_indicator:
+            return True
+        mostly_blank_numeric = (
+            total_numeric_fields > 0
+            and numeric_fields_blank_or_zero / total_numeric_fields >= 0.7
+        )
+        return has_empty_code and mostly_blank_numeric
     else:
         # Non-accounting file: Need all 3 evidence points to be conservative
         return has_empty_code and has_summary_indicator and (
@@ -176,7 +182,202 @@ def detect_duplicate_mappings(mapping: dict) -> dict:
         seen.setdefault(mapped_to, []).append(original_col)
     return {standard_name: cols for standard_name, cols in seen.items() if len(cols) > 1}
 
-# Main function to clean the dataframe based on the confirmed mapping
+def detect_repeated_header_rows(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame:
+    """
+    Detects and excludes rows where most cells simply repeat their own
+    column's header text — happens when a multi-page report export
+    reprints its column headers partway through the data. Must run BEFORE
+    rename_columns, since it compares each cell against its ORIGINAL
+    column name, not the standardized mapped_to name.
+    """
+    original_cols = [c for c in mapping.keys() if c in df.columns]
+    if len(original_cols) < 2:
+        return df
+
+    def looks_like_header_repeat(row):
+        matches = sum(
+            1 for c in original_cols
+            if str(row[c]).strip().lower() == str(c).strip().lower()
+        )
+        return matches >= max(2, len(original_cols) // 2)
+
+    is_repeat = df[original_cols].apply(looks_like_header_repeat, axis=1)
+    repeat_indices = df.index[is_repeat].tolist()
+    if repeat_indices:
+        issues.append({
+            "row": "N/A", "column": "all columns", "row_index": "N/A", "original_value": "N/A",
+            "issue": (
+                f"{len(repeat_indices)} row(s) (rows {', '.join(str(i + 2) for i in repeat_indices)}) "
+                "appear to be the column headers repeated mid-file — a common artifact when a "
+                "multi-page report restarts its header on a new page. These were excluded. "
+                "Review the source file if this is unexpected."
+            ),
+            "severity": "info"
+        })
+        df = df.drop(index=repeat_indices)
+    return df
+
+def detect_sparse_metadata_rows(df: pd.DataFrame, mapping: dict, issues: list) -> None:
+    """
+    Flags (does NOT exclude) rows where at most one mapped column is
+    populated — the rest of the row is blank. This is a content-agnostic,
+    structural signal: it never inspects what the text in the cell says
+    (no hardcoded words like "page", "total", a company name, etc.), only
+    how many of the row's mapped cells have anything in them at all.
+
+    Why this catches footer/metadata rows: when a multi-page report export
+    restarts on a new page, it commonly reprints a single stray line —
+    company name, report title, "Page X of Y", an export timestamp — into
+    what becomes one spreadsheet row. That row has exactly one populated
+    cell and every other mapped column blank. A real account record, even
+    a legitimate zero-balance one, still populates its identity columns
+    (Account, Account_Type, etc.) — only the Debit/Credit numbers might be
+    blank — so it will not trip this check.
+
+    Deliberately flag-only rather than auto-exclude (unlike
+    detect_repeated_header_rows and drop_fully_blank_rows): a Trial
+    Balance with only ONE identity column (no separate account-code
+    column) and a genuinely zero-balance, minimally-labeled account could
+    theoretically share this same 1-populated-cell shape. That's rare, but
+    without more real files to calibrate against, auto-dropping a real
+    account is a worse failure than asking the auditor to glance at it.
+    Must run AFTER drop_fully_blank_rows (so fully blank rows, which are a
+    separate, already-handled case, aren't re-flagged here) and AFTER
+    rename_columns (it reads by mapped_to column names).
+
+    Emits ONE issue PER sparse row (not one combined summary issue), each
+    carrying the real row_index and a structural "issue_type":
+    "sparse_metadata_row" tag. This is what lets the frontend offer a
+    per-row "keep" or "delete this row" action without ever inspecting
+    what text is actually in the cell — the tag identifies the issue
+    *kind*, not its content, so it works identically regardless of the
+    file's language, column names, or what the stray text says.
+    """
+    mapped_cols = [
+        info["mapped_to"] for info in mapping.values()
+        if isinstance(info, dict) and info.get("mapped_to") not in (None, "", "unknown")
+        and info.get("mapped_to") in df.columns
+    ]
+    if len(mapped_cols) < 2:
+        return
+
+    def non_blank_count(row):
+        return sum(1 for c in mapped_cols if not (pd.isna(row[c]) or str(row[c]).strip() == ""))
+
+    is_sparse = df[mapped_cols].apply(lambda row: non_blank_count(row) <= 1, axis=1)
+    sparse_indices = df.index[is_sparse].tolist()
+    for idx in sparse_indices:
+        issues.append({
+            "row": int(idx) + 2,
+            "column": "all columns",
+            "row_index": idx,
+            "original_value": "N/A",
+            "issue": (
+                "This row has only one populated field across all mapped columns. This often "
+                "means footer text, a page title, or report metadata reprinted mid-file by a "
+                "multi-page export — but it could also be a real, minimally-populated record. "
+                "This row was NOT removed automatically; please review it and either keep it "
+                "as a real record or delete it if it is not real data."
+            ),
+            "severity": "info",
+            "issue_type": "sparse_metadata_row"
+        })
+
+def detect_unlabeled_total_rows(df: pd.DataFrame, mapping: dict, issues: list, file_type: str = None) -> list:
+    """
+    Flags (does NOT exclude) rows where the account name/description field
+    is blank but most numeric fields ARE populated — the mirror image of
+    detect_sparse_metadata_rows (which catches blank name + blank numbers).
+    A real account always has a name; a row with numbers but no name is
+    almost always an unlabeled grand-total or subtotal row that a source
+    export left unlabeled (no "Total"/"Grand Total" text at all, so
+    is_summary_row's text-matching evidence can never fire for it — and
+    a file with no separate account-code column means is_summary_row's
+    empty-code evidence can never fire either).
+
+    Content-agnostic and structural, like detect_sparse_metadata_rows: it
+    never checks for specific words — only whether the description
+    column(s) are blank and whether numeric columns are populated. This
+    means it works the same way on every Trial Balance / General Ledger
+    file regardless of column names, currency, or language, not just the
+    file that first exposed this gap.
+
+    Only runs for accounting file types (trial_balance, general_ledger) —
+    the "every real row has a name" assumption is specific to that domain.
+    If the mapping doesn't have identifiable description or numeric
+    columns, this is skipped entirely (conservative: no false positives
+    from a structure we can't confidently read).
+
+    Flag-only, not auto-exclude — same reasoning as detect_sparse_metadata_rows:
+    dropping a row automatically risks losing real data if this file's
+    shape turns out to be an exception. The auditor decides.
+
+    Returns the list of flagged row indices so the caller can exclude them
+    from the generic "missing value" check on the description column —
+    otherwise the same row would get two overlapping issues (this one, plus
+    a plain "missing account_name" flag) for the same underlying problem.
+    """
+    if file_type not in ("trial_balance", "general_ledger"):
+        return []
+
+    description_cols = []
+    numeric_cols = []
+    for info in mapping.values():
+        if not isinstance(info, dict):
+            continue
+        mapped_to = str(info.get("mapped_to", "")).lower()
+        field_type = info.get("field_type", "")
+        if any(term in mapped_to for term in ['account_name', 'account_description', 'description', 'particulars', 'label']):
+            description_cols.append(mapped_to)
+        elif field_type == 'numeric':
+            numeric_cols.append(mapped_to)
+
+    description_cols = [c for c in description_cols if c in df.columns]
+    numeric_cols = [c for c in numeric_cols if c in df.columns]
+    # Can't confidently identify the structure — be conservative and skip
+    # rather than guess, same principle is_summary_row uses.
+    if not description_cols or not numeric_cols:
+        return []
+
+    def is_blank(val):
+        return pd.isna(val) or str(val).strip() == ""
+
+    def looks_like_unlabeled_total(row):
+        if not all(is_blank(row[c]) for c in description_cols):
+            return False
+        populated = 0
+        for c in numeric_cols:
+            val = row[c]
+            if is_blank(val):
+                continue
+            try:
+                if float(val) != 0:
+                    populated += 1
+            except (ValueError, TypeError):
+                # Non-numeric leftover value still counts as "populated"
+                populated += 1
+        return (populated / len(numeric_cols)) >= 0.7
+
+    is_unlabeled_total = df.apply(looks_like_unlabeled_total, axis=1)
+    flagged_indices = df.index[is_unlabeled_total].tolist()
+    for idx in flagged_indices:
+        issues.append({
+            "row": int(idx) + 2,
+            "column": "all columns",
+            "row_index": idx,
+            "original_value": "N/A",
+            "issue": (
+                "This row has no value in the account name/description field(s), but most of "
+                "its numeric fields are populated. This pattern usually means an unlabeled "
+                "grand total or subtotal row, not a real account — including it as-is would "
+                "double-count these figures in trial balance validation and totals. This row "
+                "was NOT removed automatically; please review it and either keep it as a real "
+                "record or delete it if it is a total row."
+            ),
+            "severity": "medium",
+            "issue_type": "unlabeled_total_row"
+        })
+    return flagged_indices
 def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None, file_type: str = None) -> tuple:
     """
     Main cleaning function, takes a raw dataframe and confirmed column mapping.
@@ -208,8 +409,20 @@ def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None, fi
     # Track all issues found
     issues = []
 
+    # Detect and exclude repeated header rows (must run BEFORE rename_columns)
+    df = detect_repeated_header_rows(df, mapping, issues)
     #Rename columns using confirmed mapping.Must happen first so cleaning functions can find columns by standard names
     df = rename_columns(df, mapping)
+    # Drop fully blank rows (must run AFTER rename_columns)
+    df = drop_fully_blank_rows(df, mapping, issues)
+    # Flag (do not exclude) rows that look like reprinted footer/title/metadata
+    # text mid-file — must run AFTER drop_fully_blank_rows and rename_columns
+    detect_sparse_metadata_rows(df, mapping, issues)
+    # Flag (do not exclude) rows that look like an unlabeled grand-total row —
+    # blank name but mostly-populated numeric fields. Collect the flagged
+    # indices so handle_nulls can skip the redundant generic "missing value"
+    # flag on the same row's description column.
+    unlabeled_total_indices = detect_unlabeled_total_rows(df, mapping, issues, file_type)
     # Clean date columns
     df = clean_dates(df, mapping, issues)
     # Check logical order of dates (e.g. End Date should not be before Start Date)
@@ -219,7 +432,7 @@ def clean_dataframe(df: pd.DataFrame, mapping: dict, fill_rates: dict = None, fi
     # Standardize text column casing
     df = standardize_casing(df, mapping, issues)
     # Handle null values — pass fill_rates so sparse columns get a summary flag instead of per-row noise
-    df = handle_nulls(df, mapping, issues, fill_rates, file_type)
+    df = handle_nulls(df, mapping, issues, fill_rates, file_type, unlabeled_total_indices)
     # Check text columns for inconsistent boolean/status values
     check_value_consistency(df, mapping, issues)
     # Check for near-duplicate values (same value with minor variations)
@@ -246,6 +459,36 @@ def rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
         if isinstance(info, dict) and "mapped_to" in info and info["mapped_to"].strip() != "unknown"
     }
     df = df.rename(columns=rename_dict)
+    return df
+
+def drop_fully_blank_rows(df: pd.DataFrame, mapping: dict, issues: list) -> pd.DataFrame:
+    """
+    Removes rows where every confirmed mapped column is blank. Left in
+    place these generate a cascade of misleading noise: a missing-value
+    flag per column, plus exact-duplicate flags once more than one exists.
+    """
+    mapped_cols = [
+        info["mapped_to"] for info in mapping.values()
+        if isinstance(info, dict) and info.get("mapped_to") not in (None, "", "unknown")
+        and info.get("mapped_to") in df.columns
+    ]
+    if not mapped_cols:
+        return df
+    is_blank = df[mapped_cols].apply(
+        lambda row: all(pd.isna(v) or str(v).strip() == "" for v in row), axis=1
+    )
+    blank_indices = df.index[is_blank].tolist()
+    if blank_indices:
+        issues.append({
+            "row": "N/A", "column": "all columns", "row_index": "N/A", "original_value": "N/A",
+            "issue": (
+                f"{len(blank_indices)} completely blank row(s) were found (rows "
+                f"{', '.join(str(i + 2) for i in blank_indices)}) and excluded — no data "
+                "in any mapped column, most likely leftover spacer rows from the source file."
+            ),
+            "severity": "info"
+        })
+        df = df.drop(index=blank_indices)
     return df
 
 # Function to clean and standardize date columns
@@ -647,7 +890,8 @@ def handle_nulls(
     mapping: dict,
     issues: list,
     fill_rates: dict = None,
-    file_type: str = None
+    file_type: str = None,
+    extra_excluded_indices: list = None
 ) -> pd.DataFrame:
     """
     Validate missing values without modifying the source data.
@@ -661,6 +905,12 @@ def handle_nulls(
     Other mapped columns:
     - Sparse columns (<50% filled): one summary warning.
     - Normal columns (>=50% filled): flag individual missing cells.
+
+    extra_excluded_indices: row indices already flagged elsewhere (e.g. by
+    detect_unlabeled_total_rows) with a more specific issue explaining why
+    the row's description field is blank — skipped here so the same row
+    doesn't also get a generic, less-informative "missing value" flag on
+    top of the specific one.
     """
 
     if fill_rates is None:
@@ -673,7 +923,7 @@ def handle_nulls(
     # ---------------------------------------------------------
     # Identify summary rows for accounting files
     # ---------------------------------------------------------
-    summary_row_indices = set()
+    summary_row_indices = set(extra_excluded_indices or [])
 
     if file_type in ("trial_balance", "general_ledger"):
         for idx in df.index:

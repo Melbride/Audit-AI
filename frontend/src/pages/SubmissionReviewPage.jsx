@@ -50,6 +50,7 @@ export default function SubmissionReviewPage({ user }) {
   const [acting, setActing] = useState(false);
   const [note, setNote] = useState("");
   const [goingToWorkspace, setGoingToWorkspace] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
   useEffect(() => {
     load();
@@ -67,9 +68,10 @@ export default function SubmissionReviewPage({ user }) {
     }
   };
 
-  const handleAction = async (newStatus, newStage) => {
+    const handleAction = async (newStatus, newStage) => {
     if (!user || !data?.submission) return;
     setActing(true);
+    setActionError(null);
     try {
       await updateSubmissionStatus(data.submission.submission_id, {
         status: newStatus,
@@ -81,6 +83,10 @@ export default function SubmissionReviewPage({ user }) {
       setNote("");
     } catch (err) {
       console.error("Failed to update submission", err);
+      setActionError(
+        err.response?.data?.detail ||
+        "Something went wrong sending this action. Please refresh the page to check whether it actually went through, before trying again."
+      );
     } finally {
       setActing(false);
     }
@@ -368,6 +374,7 @@ export default function SubmissionReviewPage({ user }) {
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
+            {actionError && <div className="sr-action-error">{actionError}</div>}
           </>
         )}
 

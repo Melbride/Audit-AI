@@ -8,9 +8,11 @@ import "../styles/Reports.css";
 
 const STATUS_LABELS = {
   draft: "Draft",
-  in_review: "In review",
+  pending_audit_manager: "Pending Audit Manager Review",
+  pending_engagement_partner: "Pending Partner Review",
   changes_requested: "Changes requested",
   approved: "Approved",
+  sent_to_client: "Sent to Client",
   exported: "Exported",
 };
 
@@ -54,13 +56,6 @@ export default function Reports({ user }) {
       <div className="header">
         <div className="logo" style={{ justifyContent: "space-between", width: "100%" }}>
           <span>Reports</span>
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowGenerateModal(true)}
-          >
-            <Plus size={14} />
-            Generate Report
-          </button>
         </div>
         <p className="subtitle">Every generated report across all clients, most recent first.</p>
       </div>
@@ -84,8 +79,8 @@ export default function Reports({ user }) {
                 </div>
               </div>
               <div className="report-row-status">
-                <span className={`badge badge-${r.status}`}>
-                  {STATUS_LABELS[r.status] || r.status}
+                <span className={`badge badge-${r.status} ${r.current_stage === 'pending_audit_manager' || r.current_stage === 'pending_engagement_partner' ? 'badge-pending' : ''}`}>
+                  {STATUS_LABELS[r.current_stage] || STATUS_LABELS[r.status] || r.status}
                 </span>
               </div>
             </Link>
@@ -93,13 +88,7 @@ export default function Reports({ user }) {
         </div>
       )}
 
-      {showGenerateModal && (
-        <GenerateReportModal
-          user={user}
-          onClose={() => setShowGenerateModal(false)}
-          onGenerated={handleGenerated}
-        />
-      )}
+
     </div>
   );
 }

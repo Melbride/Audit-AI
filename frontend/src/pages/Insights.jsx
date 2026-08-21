@@ -1,11 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
-import { generateInsights } from "../services/api";
 import axios from "axios";
-
-const API_BASE = "http://localhost:8000";
 import {
-  ArrowLeft,
   AlertTriangle,
   Diamond,
   Info,
@@ -19,7 +15,10 @@ import {
   Receipt,
   FileWarning,
 } from "lucide-react";
+import { generateInsights } from "../services/api";
 import "../styles/analysis.css";
+
+const API_BASE = "http://localhost:8000";
 
 const SEVERITY_CONFIG = {
   high:            { icon: AlertTriangle, label: "High Priority",  tone: "danger" },
@@ -63,47 +62,42 @@ export default function Insights() {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
-  
-  // Get data from either location.state (from AnalysisPage) or URL params (direct access)
+
   const stateData = location.state || {};
   const { insights: stateInsights, clientId: stateClientId, fileId: stateFileId, filename: stateFilename } = stateData;
-  
-  // URL params for independent access
   const { clientId: urlClientId, fileId: urlFileId } = params || {};
-  
+
   const [insights, setInsights] = useState(stateInsights || null);
-  const [clientId, setClientId] = useState(stateClientId || urlClientId || null);
-  const [fileId, setFileId] = useState(stateFileId || urlFileId || null);
+  const [clientId] = useState(stateClientId || urlClientId || null);
+  const [fileId] = useState(stateFileId || urlFileId || null);
   const [filename, setFilename] = useState(stateFilename || null);
-  const [loading, setLoading] = useState(!stateInsights); // Load if no state data
+  const [loading, setLoading] = useState(!stateInsights);
   const [error, setError] = useState(null);
 
   const [severityFilter, setSeverityFilter] = useState("all");
   const [expandedInsights, setExpandedInsights] = useState({});
 
-  const toggleInsightExpansion = (index) => {
-    setExpandedInsights(prev => ({
+  const toggleInsightExpansion = (key) => {
+    setExpandedInsights((prev) => ({
       ...prev,
-      [index]: !prev[index]
+      [key]: !prev[key],
     }));
   };
 
-  // Independent data fetching when accessed via URL params
   useEffect(() => {
     if (stateInsights) {
-      // Already have data from state, no need to fetch
       setLoading(false);
       return;
     }
 
     if (!urlClientId || !urlFileId) {
-      // No data source available
       setLoading(false);
       setError("No insights data available. Please access insights from the Analysis page.");
       return;
     }
 
-    // Fetch insights independently
+    let isMounted = true;
+
     const fetchInsights = async () => {
       setLoading(true);
       setError(null);
@@ -111,33 +105,40 @@ export default function Insights() {
         const formData = new FormData();
         formData.append("file_id", urlFileId);
         formData.append("file_type", "general");
-        
+
         const response = await generateInsights(urlClientId, formData);
-        setInsights(response.data.ai_insights || []);
+        if (!isMounted) return;
         
-        // Try to get file info for display
+        setInsights(response.data.ai_insights || []);
+
         try {
           const fileResponse = await axios.get(`${API_BASE}/files/${urlFileId}`);
-          setFilename(fileResponse.data?.filename || `File ${urlFileId}`);
-        } catch (fileErr) {
-          setFilename(`File ${urlFileId}`);
+          if (isMounted) setFilename(fileResponse.data?.filename || `File ${urlFileId}`);
+        } catch {
+          if (isMounted) setFilename(`File ${urlFileId}`);
         }
       } catch (err) {
-        setError(err.response?.data?.detail || "Could not load insights. Please access insights from the Analysis page.");
-        setInsights([]);
+        if (isMounted) {
+          setError(err.response?.data?.detail || "Could not load insights. Please access insights from the Analysis page.");
+          setInsights([]);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchInsights();
+
+    return () => {
+      isMounted = false;
+    };
   }, [stateInsights, urlClientId, urlFileId]);
 
   const filteredInsights = useMemo(() => {
     if (!insights) return [];
     const base = severityFilter === "all" ? insights : insights.filter((i) => effectiveSeverity(i) === severityFilter);
     return sortBySeverity(base);
-  }, [insights, severityFilter, effectiveSeverity]);
+  }, [insights, severityFilter]);
 
   const counts = useMemo(() => {
     const c = { high: 0, medium: 0, info: 0 };
@@ -146,10 +147,8 @@ export default function Insights() {
       if (c[sev] !== undefined) c[sev] += 1;
     });
     return c;
-  }, [insights, effectiveSeverity]);
+  }, [insights]);
 
-  // No insights were passed in — e.g. a direct page load / refresh — so
-  // there's nothing to show. Send the auditor back to Analysis to generate.
   if (loading) {
     return (
       <div className="analysis">
@@ -210,7 +209,6 @@ export default function Insights() {
         </div>
       </div>
 
-      {/* ── SEVERITY FILTER ── */}
       <div className="filter-bar">
         {SEVERITY_FILTERS.map((f) => (
           <button
@@ -232,25 +230,27 @@ export default function Insights() {
         </p>
       ) : (
         <div className="insights-page-grid">
-          {filteredInsights.map((insight, i) => {
+          {filteredInsights.map((insight, idx) => {
             const cfg = SEVERITY_CONFIG[insight.type] || SEVERITY_CONFIG[insight.severity] || SEVERITY_CONFIG.info;
             const IconComponent = cfg.icon;
-            const isExpanded = expandedInsights[i];
-            const hasDetails = insight.why || insight.recommendation;
+            
+            const itemKey = insight.id || insight.message || idx;
+            const isExpanded = Boolean(expandedInsights[itemKey]);
+            const hasDetails = Boolean(insight.why || insight.recommendation);
 
             return (
-              <div key={i} className={`insight-card insight-card--full ${isExpanded ? 'expanded' : ''}`}>
+              <div key={itemKey} className={`insight-card insight-card--full ${isExpanded ? "expanded" : ""}`}>
                 <div className="insight-card-body">
                   <div className="insight-card-head">
                     <IconComponent size={18} className="insight-icon" data-tone={cfg.tone} />
                     <span className="insight-tag">{cfg.label}</span>
                     {hasDetails && (
-                      <button 
+                      <button
                         className="insight-expand-btn"
-                        onClick={() => toggleInsightExpansion(i)}
+                        onClick={() => toggleInsightExpansion(itemKey)}
                         aria-expanded={isExpanded}
                       >
-                        {isExpanded ? '−' : '+'}
+                        {isExpanded ? "−" : "+"}
                       </button>
                     )}
                   </div>

@@ -16,6 +16,7 @@ function CorrectedResultsPage() {
     const [acknowledging, setAcknowledging] = useState(null)
     const [highlightedRowIndex, setHighlightedRowIndex] = useState(null)
     const [standardizing, setStandardizing] = useState(null)
+    const [deletingRow, setDeletingRow] = useState(null)
 
     if (!cleanResult || !uploadResult) {
         return (
@@ -73,10 +74,62 @@ function CorrectedResultsPage() {
         }
     }
 
+    // Deletes a single row via the existing inline-corrections mechanism —
+    // reuses the same "_row_deleted" correction shape apply_saved_corrections
+    // already understands (the same one the Excel-diff re-upload path uses),
+    // so no new backend endpoint is needed. Used for issues like
+    // "sparse_metadata_row" where the row was flagged but deliberately not
+    // auto-removed, and the auditor decides it's not real data.
+    const handleDeleteRow = async (issue) => {
+        const rowIndex = parseInt(issue.row_index)
+        if (isNaN(rowIndex)) return
+        setDeletingRow(issue.issue_id)
+        setError(null)
+        try {
+            const formData = new FormData()
+            formData.append('file_id', uploadResult.file_id)
+            formData.append('client_id', String(clientId))
+            formData.append('file_type', fileType || 'general')
+            formData.append('corrections', JSON.stringify([{
+                row_index: rowIndex,
+                column: '_row_deleted',
+                original_value: 'present',
+                corrected_value: 'deleted_by_auditor'
+            }]))
+            formData.append('corrected_by', 'Auditor')
+            const response = await axios.post('http://localhost:8000/clean/submit-inline-corrections', formData)
+            setCurrentResult(response.data)
+        } catch (err) {
+            setError(err.response?.data?.detail || 'Could not delete this row. Please try again.')
+        } finally {
+            setDeletingRow(null)
+        }
+    }
+
     // Detects the "near-duplicate value" issue type, which stores both
     // candidate values in original_value separated by " / "
     const isDuplicateValueIssue = (issue) =>
         issue.original_value && issue.original_value.includes(' / ') && issue.row === 'N/A'
+
+    // Structural checks used to decide which action(s) an issue card gets.
+    // These key off severity / row_index / issue_type only — never off what
+    // the issue's text says or what file it came from — so the behavior is
+    // identical for every file, not tuned to any one upload.
+    //
+    // Issue types where the backend flagged a specific row but deliberately
+    // did NOT remove it, leaving the keep-or-delete call to the auditor.
+    // Adding a new backend check of this kind only needs its issue_type
+    // added here — no other frontend change needed.
+    const ROW_DELETABLE_ISSUE_TYPES = new Set(['sparse_metadata_row', 'unlabeled_total_row'])
+    const isRowDeletableIssue = (issue) => ROW_DELETABLE_ISSUE_TYPES.has(issue.issue_type)
+    const isRealRowInfoIssue = (issue) => issue.severity === 'info' && issue.row_index !== 'N/A' && !isRowDeletableIssue(issue)
+    // Any other summary-level issue (branch/department sparsity, unknown
+    // column, mixed formats, excluded-rows notices, etc.) that isn't
+    // high-severity gets a plain acknowledge — high stays blocking on purpose.
+    const isGenericAcknowledgeableIssue = (issue) =>
+        issue.row_index === 'N/A' &&
+        issue.severity !== 'high' &&
+        !isDuplicateValueIssue(issue)
 
     // Standardizes every row matching replaceValue to keepValue for the
     // given issue's column, then refreshes the page with the re-cleaned result
@@ -148,7 +201,7 @@ function CorrectedResultsPage() {
                                     </div>
                                     <p className="cr-issue-desc">{issue.issue}</p>
 
-                                    {issue.severity === 'info' && issue.row_index !== 'N/A' && (
+                                    {isRealRowInfoIssue(issue) && (
                                         <div className="cr-issue-actions">
                                             <button
                                                 className="cr-btn cr-btn-small"
@@ -163,6 +216,37 @@ function CorrectedResultsPage() {
                                                 onClick={() => handleEditThisCell(issue)}
                                             >
                                                 Edit this cell
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {isRowDeletableIssue(issue) && (
+                                        <div className="cr-issue-actions">
+                                            <button
+                                                className="cr-btn cr-btn-small"
+                                                disabled={acknowledging === issue.issue_id || deletingRow === issue.issue_id}
+                                                onClick={() => handleConfirmCorrect(issue)}
+                                            >
+                                                {acknowledging === issue.issue_id ? 'Confirming...' : 'Keep as real record'}
+                                            </button>
+                                            <button
+                                                className="cr-btn cr-btn-small cr-btn-secondary"
+                                                disabled={acknowledging === issue.issue_id || deletingRow === issue.issue_id}
+                                                onClick={() => handleDeleteRow(issue)}
+                                            >
+                                                {deletingRow === issue.issue_id ? 'Deleting...' : 'Delete this row'}
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {isGenericAcknowledgeableIssue(issue) && (
+                                        <div className="cr-issue-actions">
+                                            <button
+                                                className="cr-btn cr-btn-small"
+                                                disabled={acknowledging === issue.issue_id}
+                                                onClick={() => handleConfirmCorrect(issue)}
+                                            >
+                                                {acknowledging === issue.issue_id ? 'Confirming...' : 'Acknowledge'}
                                             </button>
                                         </div>
                                     )}

@@ -87,7 +87,7 @@ def calculate_financial_analytics(financial_statements: dict, financial_ratios: 
     liability_by_category = _sum_by_category(liability_items)
 
     ratios = {
-        "current_ratio": _safe_ratio(current_assets, current_liabilities),
+        "current_ratio": financial_ratios.get("current_ratio") or _safe_ratio(current_assets, current_liabilities),
         "debt_ratio": _safe_pct(total_liabilities, total_assets),
         "gross_margin": financial_ratios.get("gross_profit_margin"),
         "operating_margin": _safe_pct(operating_profit, total_revenue),

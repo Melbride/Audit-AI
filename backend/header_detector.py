@@ -188,7 +188,7 @@ def _extract_metadata_from_rows(df: pd.DataFrame, header_row_index: int) -> Dict
                 break
         
         # Currency patterns
-        currency_patterns = [r'\b(usd|kes|gbp|eur|zar|naira|ghs|ugx|tzs|rwf|bif|mwk|zmw|szl|nad|bwp|lsl|zar)\b', r'\(\$|£|€|ksh|rtgs|naira|₦|gh₵|ugx|tzs|rwf|bif|mwk|zmw|szl|nad|bwp|lsl|r\)']
+        currency_patterns = [r'\b(KSH|kes|gbp|eur|zar|naira|ghs|ugx|tzs|rwf|bif|mwk|zmw|szl|nad|bwp|lsl|zar)\b', r'\(\$|£|€|ksh|rtgs|naira|₦|gh₵|ugx|tzs|rwf|bif|mwk|zmw|szl|nad|bwp|lsl|r\)']
         for pattern in currency_patterns:
             match = re.search(pattern, row_lower)
             if match:

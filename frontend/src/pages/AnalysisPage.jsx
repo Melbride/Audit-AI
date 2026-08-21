@@ -15,35 +15,17 @@ import {
   Receipt,
   Loader2,
   FileWarning,
-  ArrowRight,
-  ArrowLeft,
   History,
 } from "lucide-react";
 import { getEngagement, saveAnalysis, openWorkspace } from "../services/api";
 import GenerateReportModal from "../components/GenerateReportModal";
+import FinancialCharts from "../components/FinancialCharts";
 import "../styles/analysis.css";
 
 const API_BASE = "http://localhost:8000";
 
-// ── COLORS (chart fills — kept as literal hex since donut/bar slices need a fixed sequence) ──
-const CHART_COLORS = ["#2563eb", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#f97316"];
-
-// ── SEVERITY SORTING ─────────────────────────────────────────────────────────────
 const SEVERITY_ORDER = { high: 0, medium: 1, info: 2 };
 
-const effectiveSeverity = (insight) => {
-  if (insight.severity) return insight.severity;
-  const cfg = SEVERITY_CONFIG[insight.type];
-  if (!cfg) return "info";
-  if (cfg.tone === "danger") return "high";
-  if (cfg.tone === "warning") return "medium";
-  return "info";
-};
-
-const sortBySeverity = (arr) =>
-  [...(arr || [])].sort((a, b) => SEVERITY_ORDER[effectiveSeverity(a)] - SEVERITY_ORDER[effectiveSeverity(b)]);
-
-// icon + label + semantic tone; tone drives color via CSS (data-tone attribute)
 const SEVERITY_CONFIG = {
   high:            { icon: AlertTriangle, label: "High Priority",  tone: "danger" },
   medium:          { icon: Diamond,       label: "Medium Priority", tone: "warning" },
@@ -61,6 +43,18 @@ const SEVERITY_CONFIG = {
   statement_check: { icon: Receipt,       label: "Statement Check", tone: "danger" },
 };
 
+const effectiveSeverity = (insight) => {
+  if (insight.severity) return insight.severity;
+  const cfg = SEVERITY_CONFIG[insight.type];
+  if (!cfg) return "info";
+  if (cfg.tone === "danger") return "high";
+  if (cfg.tone === "warning") return "medium";
+  return "info";
+};
+
+const sortBySeverity = (arr) =>
+  [...(arr || [])].sort((a, b) => SEVERITY_ORDER[effectiveSeverity(a)] - SEVERITY_ORDER[effectiveSeverity(b)]);
+
 const fmt = (n) => n == null ? "—" : new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 }).format(n);
 const fmtShort = (n) => {
   if (n == null) return "—";
@@ -75,117 +69,12 @@ const fmtDate = (dateStr) => {
   return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 };
 
-// ── MINI BAR CHART ────────────────────────────────────────────────────────────
-function BarChart({ data, keys, colors, height = 160 }) {
-  const max = Math.max(1, ...data.flatMap(d => keys.map(k => d[k] ?? 0)));
-  const groupW = Math.floor(560 / Math.max(data.length, 1));
-  const barW = Math.floor(groupW / (keys.length + 0.8));
-
-  return (
-    <svg viewBox={`0 0 ${data.length * groupW} ${height + 36}`} style={{ width: "100%", overflow: "visible" }}>
-      {data.map((d, i) => (
-        <g key={i} transform={`translate(${i * groupW + 4}, 0)`}>
-          {keys.map((k, ki) => {
-            const val = d[k] ?? 0;
-            const h = max > 0 ? Math.round((val / max) * height) : 0;
-            return (
-              <rect key={k} x={ki * (barW + 2)} y={height - h} width={barW} height={h}
-                fill={colors[ki]} rx="2" opacity="0.9">
-                <title>{`${d.label} ${k}: ${fmt(val)}`}</title>
-              </rect>
-            );
-          })}
-          <text x={groupW / 2 - 8} y={height + 18} textAnchor="middle"
-            className="chart-axis-label">{d.label}</text>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-// ── DONUT CHART ───────────────────────────────────────────────────────────────
-function DonutChart({ data, colors, size = 150 }) {
-  const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  const r = size / 2 - 8;
-  const cx = size / 2, cy = size / 2;
-  let angle = -Math.PI / 2;
-  const slices = data.map((d, i) => {
-    const sweep = (d.value / total) * 2 * Math.PI;
-    const x1 = cx + r * Math.cos(angle);
-    const y1 = cy + r * Math.sin(angle);
-    angle += sweep;
-    const x2 = cx + r * Math.cos(angle);
-    const y2 = cy + r * Math.sin(angle);
-    return {
-      path: `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${sweep > Math.PI ? 1 : 0} 1 ${x2},${y2} Z`,
-      color: colors[i % colors.length], label: d.label, value: d.value,
-      pct: Math.round((d.value / total) * 100),
-    };
-  });
-  return (
-    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
-      {slices.map((s, i) => (
-        <path key={i} d={s.path} fill={s.color} stroke="var(--background)" strokeWidth="2">
-          <title>{`${s.label}: ${fmt(s.value)} (${s.pct}%)`}</title>
-        </path>
-      ))}
-      <circle cx={cx} cy={cy} r={r * 0.52} fill="var(--background)" />
-    </svg>
-  );
-}
-
-// ── SPARKLINE ─────────────────────────────────────────────────────────────────
-function Sparkline({ values, color, width = 80, height = 28 }) {
-  if (!values || values.length < 2) return null;
-  const max = Math.max(...values), min = Math.min(...values);
-  const range = max - min || 1;
-  const pts = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * width;
-    const y = height - ((v - min) / range) * (height - 4) - 2;
-    return `${x},${y}`;
-  });
-  return (
-    <svg width={width} height={height}>
-      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-// ── DONUT PANEL (chart + legend, shared by expense/revenue) ───────────────────
-function DonutPanel({ data }) {
-  const total = data.reduce((s, x) => s + x.value, 0) || 1;
-  return (
-    <div className="donut-panel">
-      <DonutChart data={data} colors={CHART_COLORS} size={150} />
-      <div className="donut-legend">
-        {data.map((d, i) => {
-          const pct = Math.round((d.value / total) * 100);
-          return (
-            <div key={d.label} className="legend-row">
-              <span className="legend-dot" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
-              <span className="legend-label">{d.label}</span>
-              <span className="legend-pct">{pct}%</span>
-              <span className="legend-value">{fmtShort(d.value)}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function AnalysisPage({ user }) {
   const { engagementId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Two ways to land on this page:
-  // 1. Fresh pipeline run — navigate('/analysis', { state: { cleanResult, clientId, uploadResult, fileType } })
-  // 2. Viewing a saved analysis — navigate('/analysis', { state: { savedAnalysis, isViewMode: true } })
-  //    (from AnalysisHistory.jsx, and eventually an engagement/client "View Analysis" link)
   const { cleanResult, clientId: liveClientId, uploadResult, fileType: liveFileType, savedAnalysis, isViewMode } = location.state || {};
-
   const isSavedView = Boolean(isViewMode && savedAnalysis);
 
   const fileId = isSavedView ? savedAnalysis.file_id : (cleanResult?.file_id || uploadResult?.file_id);
@@ -194,18 +83,16 @@ export default function AnalysisPage({ user }) {
 
   const [engagement, setEngagement] = useState(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [analysisData, setAnalysisData] = useState(null);
   const [insights, setInsights] = useState(null);
   const [expandedInsights, setExpandedInsights] = useState({});
-  const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | "saved" | "error"
-  const [submitStatus, setSubmitStatus] = useState(null); // null | "submitting" | "submitted" | "error"
+  const [saveStatus, setSaveStatus] = useState(null);
+  const [submitStatus, setSubmitStatus] = useState(null);
   const [submitError, setSubmitError] = useState(null);
 
-  // Optional engagement fetch — only used for the "Generate Report" button context
   useEffect(() => {
     if (!engagementId) {
       setEngagement(null);
@@ -216,17 +103,16 @@ export default function AnalysisPage({ user }) {
       .catch((err) => console.error("Failed to load engagement", err));
   }, [engagementId]);
 
-  // Saved-view mode: load straight from the saved snapshot, no /analyze call
   useEffect(() => {
     if (!isSavedView) return;
     setAnalysisData(savedAnalysis.analysis_data || null);
     setInsights(savedAnalysis.insights_data || []);
   }, [isSavedView, savedAnalysis]);
 
-  // Live mode: real data fetch — runs whenever we have a real file_id + client_id from the pipeline
   useEffect(() => {
-    if (isSavedView) return; // saved view already has its data, never re-runs /analyze
-    if (!fileId || !clientId) return;
+    if (isSavedView || !fileId || !clientId) return;
+    let isMounted = true;
+
     const load = async () => {
       setLoading(true);
       setError(null);
@@ -235,29 +121,31 @@ export default function AnalysisPage({ user }) {
         formData.append("file_id", fileId);
         formData.append("file_type", fileType || "general");
         const response = await axios.post(`${API_BASE}/analyze/${clientId}`, formData);
-        setAnalysisData(response.data);
         
-        // Auto-generate insights after financial analysis completes
-        if (response.data && !isSavedView) {
+        if (!isMounted) return;
+        setAnalysisData(response.data);
+
+        if (response.data) {
           try {
             const insightsFormData = new FormData();
             insightsFormData.append("file_id", fileId);
             insightsFormData.append("file_type", fileType || "general");
             const insightsResponse = await axios.post(`${API_BASE}/analyze/${clientId}/insights`, insightsFormData);
-            setInsights(insightsResponse.data.ai_insights || []);
+            if (isMounted) setInsights(insightsResponse.data.ai_insights || []);
           } catch (insightsErr) {
             console.error("Auto-insights generation failed:", insightsErr);
-            // Don't block the main analysis if insights fail
-            setInsights([]);
+            if (isMounted) setInsights([]);
           }
         }
       } catch (err) {
-        setError(err.response?.data?.detail || "Could not run financial analysis.");
+        if (isMounted) setError(err.response?.data?.detail || "Could not run financial analysis.");
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
     load();
+
+    return () => { isMounted = false; };
   }, [fileId, clientId, fileType, isSavedView]);
 
   const handleGenerateInsights = async () => {
@@ -277,16 +165,10 @@ export default function AnalysisPage({ user }) {
     }
   };
 
-  const toggleInsightExpansion = (index) => {
-    setExpandedInsights(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
+  const toggleInsightExpansion = (key) => {
+    setExpandedInsights(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Persists the already-computed analysis + insights for this file so they
-  // can be revisited later without re-running /analyze. Only real data —
-  // requires analysisData to already exist, never falls back to a placeholder.
   const handleSaveAnalysis = async () => {
     if (!user || !analysisData || !fileId || !clientId) return;
     setSaveStatus("saving");
@@ -312,11 +194,7 @@ export default function AnalysisPage({ user }) {
     setSubmitStatus("submitting");
     setSubmitError(null);
     try {
-      const wsRes = await openWorkspace({
-        user_id: user.user_id,
-        client_id: clientId,
-        file_id: fileId,
-      });
+      const wsRes = await openWorkspace({ user_id: user.user_id, client_id: clientId, file_id: fileId });
       const ws = wsRes.data || wsRes;
       if (!ws?.workspace_id) throw new Error("Could not resolve workspace");
 
@@ -332,9 +210,6 @@ export default function AnalysisPage({ user }) {
     }
   };
 
-  // If there's no real pipeline data and no saved analysis to view, fall back
-  // to a simple "no data" state instead of pretending with mock data
-  // Note: In saved view mode, we don't need fileId/clientId since we have the data directly
   if (!isSavedView && (!fileId || !clientId)) {
     return (
       <div className="analysis">
@@ -350,7 +225,6 @@ export default function AnalysisPage({ user }) {
     );
   }
 
-  // In saved view mode, also validate that we have the required saved analysis data
   if (isSavedView && (!savedAnalysis || !savedAnalysis.analysis_data)) {
     return (
       <div className="analysis">
@@ -359,7 +233,7 @@ export default function AnalysisPage({ user }) {
           <h3>Saved analysis not found</h3>
           <p>The saved analysis data could not be loaded. It may have been deleted or corrupted.</p>
           <button className="btn btn-primary" style={{ marginTop: "16px" }} onClick={() => navigate("/analysis/history")}>
-          Back to History
+            Back to History
           </button>
         </div>
       </div>
@@ -367,15 +241,13 @@ export default function AnalysisPage({ user }) {
   }
 
   const analysisScope = analysisData?.analysis_scope;
-  const analysisBasis = analysisData?.analysis_basis; // "classified_accounts" or "generic_columns"
+  const analysisBasis = analysisData?.analysis_basis;
   const financialAnalytics = analysisData?.financial_analytics;
   const comparativeAnalytics = analysisData?.comparative_analytics;
   const breakdowns = analysisData?.breakdowns || {};
-  const monthlyTrend = analysisData?.monthly_trend || {};
 
   const isStatementBased = analysisBasis === "classified_accounts" && financialAnalytics;
 
-  // ── Build chart data from real financial_analytics (statement-based path) ──
   const profitLoss = financialAnalytics?.profit_loss;
   const ratios = financialAnalytics?.ratios;
   const balanceSheetSummary = financialAnalytics?.balance_sheet_summary;
@@ -386,17 +258,10 @@ export default function AnalysisPage({ user }) {
   const revenueDonutData = Object.entries(revenueByCategory).map(([label, v]) => ({ label, value: v.amount }));
 
   const periodSummaries = comparativeAnalytics?.period_summaries || [];
-  const periodBarData = periodSummaries.map(p => ({
-    label: p.period,
-    revenue: p.total_revenue,
-    expenses: p.total_expenses,
-  }));
   const latestComparison = comparativeAnalytics?.latest_period_comparison;
 
   return (
     <div className="analysis">
-
-      {/* ── HEADER ── */}
       <div className="page-title">
         <div>
           <h1>Financial Analytics</h1>
@@ -406,7 +271,7 @@ export default function AnalysisPage({ user }) {
               : `${uploadResult?.filename || "—"} · Client ${clientId}`}
           </p>
         </div>
-        {/* Saved-snapshot attribution banner — who saved this and when */}
+
         {isSavedView && (
           <div className="snapshot-banner">
             <History size={14} />
@@ -415,6 +280,7 @@ export default function AnalysisPage({ user }) {
             {savedAnalysis.engagement_name && <span className="snapshot-banner-engagement">· {savedAnalysis.engagement_name}</span>}
           </div>
         )}
+
         <div className="page-actions">
           {isSavedView ? (
             <button className="btn btn-secondary" onClick={() => navigate("/analysis/history")}>
@@ -460,7 +326,6 @@ export default function AnalysisPage({ user }) {
 
       {analysisData && (
         <>
-          {/* ── SCOPE BANNER ── */}
           {!isStatementBased && (
             <div className="banner banner--warning">
               {analysisScope === "undetermined"
@@ -469,10 +334,8 @@ export default function AnalysisPage({ user }) {
             </div>
           )}
 
-          {/* ═══════════════════ STATEMENT-BASED VIEW (trial balance / general ledger) ═══════════════════ */}
           {isStatementBased && (
             <>
-              {/* KPI CARDS */}
               <div className="kpi-grid">
                 <div className="kpi-card">
                   <h4>Revenue</h4>
@@ -488,7 +351,6 @@ export default function AnalysisPage({ user }) {
                 </div>
               </div>
 
-              {/* KEY RATIOS */}
               <div className="dashboard-section">
                 <div className="section-header"><h2>Key Ratios</h2></div>
                 <div className="ratio-grid">
@@ -508,7 +370,6 @@ export default function AnalysisPage({ user }) {
                 </div>
               </div>
 
-              {/* COMPARATIVE ANALYTICS */}
               {comparativeAnalytics?.available && (
                 <div className="dashboard-section">
                   <div className="section-header"><h2>Comparative Analytics</h2></div>
@@ -528,10 +389,8 @@ export default function AnalysisPage({ user }) {
                     </div>
                   )}
 
-                  {periodBarData.length > 0 && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <BarChart data={periodBarData} keys={["revenue", "expenses"]} colors={["#2a78d6", "#e34948"]} height={140} />
-                    </div>
+                  {periodSummaries.length > 0 && (
+                    <FinancialCharts periodSummaries={periodSummaries} />
                   )}
 
                   <div className="section-header" style={{ marginBottom: "8px" }}>
@@ -566,25 +425,13 @@ export default function AnalysisPage({ user }) {
                 </div>
               )}
 
-              {/* EXPENSE / REVENUE BREAKDOWN */}
-              <div className="chart-grid" style={{ marginBottom: "28px" }}>
-                {expenseDonutData.length > 0 && (
-                  <div className="chart-card">
-                    <h3>Expense Breakdown</h3>
-                    <DonutPanel data={expenseDonutData} />
-                  </div>
-                )}
-                {revenueDonutData.length > 0 && (
-                  <div className="chart-card">
-                    <h3>Revenue Breakdown</h3>
-                    <DonutPanel data={revenueDonutData} />
-                  </div>
-                )}
-              </div>
+              <FinancialCharts 
+                expenseDonutData={expenseDonutData} 
+                revenueDonutData={revenueDonutData} 
+              />
             </>
           )}
 
-          {/* ═══════════════════ GENERIC VIEW (non-ledger files) ═══════════════════ */}
           {!isStatementBased && Object.keys(breakdowns).length > 0 && (
             <div className="dashboard-section">
               <div className="section-header"><h2>Breakdowns</h2></div>
@@ -610,7 +457,6 @@ export default function AnalysisPage({ user }) {
             </div>
           )}
 
-          {/* ── INSIGHTS (preview) ── */}
           <div>
             <div className="insights-toolbar">
               <div>
@@ -641,14 +487,15 @@ export default function AnalysisPage({ user }) {
                   {" · "}{insights.filter(i => effectiveSeverity(i) === "info").length} info
                 </p>
                 <div className="insight-grid">
-                  {sortBySeverity(insights).slice(0, 6).map((insight, i) => {
+                  {sortBySeverity(insights).slice(0, 6).map((insight, idx) => {
                     const cfg = SEVERITY_CONFIG[insight.type] || SEVERITY_CONFIG[insight.severity] || SEVERITY_CONFIG.info;
                     const IconComponent = cfg.icon;
-                    const isExpanded = expandedInsights[i];
+                    const insightKey = insight.id || insight.message || idx;
+                    const isExpanded = expandedInsights[insightKey];
                     const hasDetails = insight.why || insight.recommendation;
 
                     return (
-                      <div key={i} className={`insight-card ${isExpanded ? 'expanded' : ''}`}>
+                      <div key={insightKey} className={`insight-card ${isExpanded ? 'expanded' : ''}`}>
                         <div className="insight-card-body">
                           <div className="insight-card-head">
                             <IconComponent size={18} className="insight-icon" data-tone={cfg.tone} />
@@ -656,7 +503,7 @@ export default function AnalysisPage({ user }) {
                             {hasDetails && (
                               <button 
                                 className="insight-expand-btn"
-                                onClick={() => toggleInsightExpansion(i)}
+                                onClick={() => toggleInsightExpansion(insightKey)}
                                 aria-expanded={isExpanded}
                               >
                                 {isExpanded ? '−' : '+'}
@@ -690,7 +537,7 @@ export default function AnalysisPage({ user }) {
                   className="btn btn-secondary"
                   style={{ marginTop: "16px" }}
                   onClick={() =>
-                    navigate("/insights", {
+                    navigate(`/insights/${clientId}/${fileId}`, {
                       state: {
                         insights,
                         clientId,

@@ -12,7 +12,7 @@ export default function ReportDetail({ user }) {
           to="/reports"
           className="inline-flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-slate-800 transition-colors"
         >
-          <ArrowLeft size={14} />
+          {/* <ArrowLeft size={14} /> */}
           Back to reports
         </Link>
       </div>

@@ -265,6 +265,11 @@ def init_db():
     if cursor.fetchone()["count"] == 0:
         cursor.execute("ALTER TABLE submissions ADD COLUMN file_id VARCHAR(255) NULL")
 
+    # Add sheet_name to submissions table for Excel multi-sheet support
+    cursor.execute("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = %s AND table_name = 'submissions' AND column_name = 'sheet_name'", (DB_CONFIG["database"],))
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN sheet_name VARCHAR(255) NULL")
+
     # Notifications table. Stores in-app alerts sent to users when submissions are ready for review.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notifications (
@@ -499,6 +504,21 @@ def init_db():
             updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(user_id),
             FOREIGN KEY (engagement_id) REFERENCES engagements(engagement_id)
+        )
+    """)
+
+    # Engagement final analysis table. Stores the final analysis snapshot for an engagement.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS engagement_final_analysis (
+            id              INT AUTO_INCREMENT PRIMARY KEY,
+            engagement_id   INT NOT NULL,
+            saved_by        INT NOT NULL,
+            analysis_data   LONGTEXT,
+            insights_data   LONGTEXT,
+            included_sections LONGTEXT,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (engagement_id) REFERENCES engagements(engagement_id),
+            FOREIGN KEY (saved_by) REFERENCES users(user_id)
         )
     """)
 

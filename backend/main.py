@@ -1437,7 +1437,11 @@ async def upload_corrected_trial_balance(
             if df is None:
                 raise HTTPException(status_code=400, detail="Could not extract any content from DOCX.")
         else:
-            df = pd.read_csv(save_path, dtype=str) if ext == "csv" else pd.read_excel(save_path, dtype=str, sheet_name=(sheet_name if sheet_name else 0))
+            stored_header_row = existing_upload.get("header_row_index")
+            if ext == "csv":
+                df = pd.read_csv(save_path, header=stored_header_row if stored_header_row is not None else 0, dtype=str)
+            else:
+                df = pd.read_excel(save_path, dtype=str, sheet_name=(sheet_name if sheet_name else 0), header=stored_header_row if stored_header_row is not None else 0)
             df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
             df = df.dropna(axis=1, how='all')
             df = df.loc[:, ~(df == '').all()]
@@ -1658,7 +1662,7 @@ async def submit_uploaded_file(
             FROM users u
             INNER JOIN engagement_team et ON u.user_id = et.user_id
             WHERE et.engagement_id = %s 
-            AND u.role IN ('Auditor', 'Senior Auditor', 'Assistant Manager', 'Audit Manager', 'Engagement Partner', 'Quality Reviewer')
+            AND u.role = 'Auditor'
         """, (engagement['engagement_id'],))
         
         auditors = cursor.fetchall()
@@ -3708,10 +3712,17 @@ def send_engagement_to_client(
     current_user: dict = Depends(require_role("Engagement Partner")),
 ):
     cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM engagements WHERE engagement_id = %s", (engagement_id,))
+    cursor.execute("""
+        SELECT e.*, c.company_name, c.email as client_email, c.contact_person 
+        FROM engagements e
+        LEFT JOIN clients c ON e.client_id = c.client_id
+        WHERE e.engagement_id = %s
+    """, (engagement_id,))
     engagement = cursor.fetchone()
     if not engagement:
         raise HTTPException(status_code=404, detail="Engagement not found")
+    if not engagement.get("client_email"):
+        raise HTTPException(status_code=400, detail="Client has no email address on record")
 
     progress_by_id = fetch_engagement_progress(db, [engagement_id])
     apply_display_status(engagement, progress_by_id.get(engagement_id, {}))
@@ -3724,13 +3735,83 @@ def send_engagement_to_client(
             )
         )
 
+    # Get approved sections for the email
+    cursor.execute("""
+        SELECT sec.section_name, s.status, s.notes
+        FROM submissions s
+        LEFT JOIN audit_sections sec ON s.section_id = sec.section_id
+        WHERE s.engagement_id = %s AND s.status = 'Approved'
+        ORDER BY sec.section_name
+    """, (engagement_id,))
+    approved_sections = cursor.fetchall()
+
+    if not approved_sections:
+        raise HTTPException(status_code=400, detail="No approved sections found for this engagement")
+
+    sections_html = "".join([
+        f"<tr><td style='padding:8px;border:1px solid #ddd'>{s['section_name']}</td>"
+        f"<td style='padding:8px;border:1px solid #ddd;color:green'>Approved</td></tr>"
+        for s in approved_sections
+    ])
+
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1E3A5F;">Audit Report — {engagement['engagement_name']}</h2>
+        <p>Dear {engagement.get('contact_person') or engagement.get('company_name')},</p>
+        <p>We are pleased to inform you that the following audit sections for <strong>{engagement['engagement_name']}</strong>
+        (Financial Year {engagement['financial_year']}) have been completed and approved:</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0">
+            <thead>
+                <tr style="background:#1E3A5F;color:white">
+                    <th style="padding:10px;text-align:left">Section</th>
+                    <th style="padding:10px;text-align:left">Status</th>
+                </tr>
+            </thead>
+            <tbody>{sections_html}</tbody>
+        </table>
+        <p>Please contact us if you have any questions regarding this audit.</p>
+        <br>
+        <p style="color:#7f8c8d;font-size:12px">This is an automated message from Audit AI.</p>
+    </div>
+    """
+
+    # Send the email
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_USER
+    msg["To"] = engagement["client_email"]
+    msg["Subject"] = f"Audit Report — {engagement['engagement_name']} (FY {engagement['financial_year']})"
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_USER, engagement["client_email"], msg.as_string())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+
+    # Add notifications for the engagement team
     cursor2 = db.cursor()
+    cursor.execute("""
+        SELECT u.user_id FROM users u
+        INNER JOIN engagement_team et ON u.user_id = et.user_id
+        WHERE et.engagement_id = %s
+    """, (engagement_id,))
+    for row in cursor.fetchall():
+        cursor2.execute(
+            "INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
+            (row['user_id'],
+             f"Audit report for {engagement['engagement_name']} has been sent to {engagement.get('company_name')}",
+             "engagement_alert")
+        )
+
+    # Mark engagement as sent to client
     cursor2.execute(
-        "UPDATE engagements SET sent_to_client_at = NOW() WHERE engagement_id = %s",
+        "UPDATE engagements SET sent_to_client_at = NOW(), status = 'Completed' WHERE engagement_id = %s",
         (engagement_id,)
     )
     db.commit()
-    return {"message": "Engagement marked as sent to client", "display_status": "Completed"}
+    
+    return {"message": "Engagement marked as sent to client and email sent", "display_status": "Completed"}
 
 # Delete an engagement along with its audit sections and team assignments
 @app.delete("/engagements/{engagement_id}")
@@ -4110,28 +4191,29 @@ def update_submission_status(submission_id: int, s: SubmissionStatus, db=Depends
 
     db.commit()
     if s.status == "Approved":
-
-        progress_by_id = fetch_engagement_progress(db, [sub['engagement_id']])
-        progress = progress_by_id.get(sub['engagement_id'], {})
-        if progress.get("total_sections", 0) > 0 and progress.get("approved_sections", 0) == progress.get("total_sections", 0):
-            complete_cursor = db.cursor(dictionary=True)
-            complete_cursor.execute("""
-                SELECT DISTINCT u.user_id FROM users u
-                INNER JOIN engagement_team et ON u.user_id = et.user_id
-                WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) IN
-                    ('Auditor', 'Senior Auditor', 'Assistant Manager', 'Audit Manager', 'Engagement Partner', 'Quality Reviewer')
-            """, (sub['engagement_id'],))
-            complete_message = f"All in-scope sections for {sub['engagement_name']} are now approved. Ready for final review."
-            write_cursor = db.cursor()
-            for row in complete_cursor.fetchall():
-                write_cursor.execute(
-                    "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
-                    (row['user_id'], complete_message, "engagement_ready", sub['engagement_id'])
-                )
-            db.commit()
-
-        notify_if_ready_for_final_analysis(db, sub["engagement_id"])
-
+        try:
+            progress_by_id = fetch_engagement_progress(db, [sub['engagement_id']])
+            progress = progress_by_id.get(sub['engagement_id'], {})
+            if progress.get("total_sections", 0) > 0 and progress.get("approved_sections", 0) == progress.get("total_sections", 0):
+                complete_cursor = db.cursor(dictionary=True)
+                complete_cursor.execute("""
+                    SELECT DISTINCT u.user_id FROM users u
+                    INNER JOIN engagement_team et ON u.user_id = et.user_id
+                    WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) IN
+                        ('Auditor', 'Senior Auditor', 'Assistant Manager', 'Audit Manager', 'Engagement Partner', 'Quality Reviewer')
+                """, (sub['engagement_id'],))
+                complete_message = f"All in-scope sections for {sub['engagement_name']} are now approved. Ready for final review."
+                write_cursor = db.cursor()
+                for row in complete_cursor.fetchall():
+                    write_cursor.execute(
+                        "INSERT INTO notifications (user_id, message, type, engagement_id) VALUES (%s, %s, %s, %s)",
+                        (row['user_id'], complete_message, "engagement_ready", sub['engagement_id'])
+                    )
+                db.commit()
+            notify_if_ready_for_final_analysis(db, sub["engagement_id"])
+        except Exception as e:
+            # The status update itself already committed successfully above 
+            print(f"WARNING: post-approval notification step failed for submission {submission_id}: {e}")
     return {"message": f"Submission status updated to {s.status}"}
 
 # Delete a submission
@@ -4453,6 +4535,14 @@ def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, 
 
     file_id = ws.get("file_id")
 
+    # Get sheet_name from uploads table for Excel files
+    sheet_name = None
+    if file_id:
+        cursor.execute("SELECT sheet_name FROM uploads WHERE file_id = %s", (file_id,))
+        upload_row = cursor.fetchone()
+        if upload_row:
+            sheet_name = upload_row.get("sheet_name")
+
     # Reuse the existing submission for this specific FILE (not just section) if one exists
     cursor.execute(
         "SELECT * FROM submissions WHERE section_id = %s AND file_id = %s ORDER BY created_at DESC LIMIT 1",
@@ -4476,14 +4566,14 @@ def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, 
     write_cursor = db.cursor()
     if existing:
         write_cursor.execute(
-            "UPDATE submissions SET status = %s, current_stage = %s, notes = %s, submitted_by = %s WHERE submission_id = %s",
-            ("Submitted", "Accountant", req.notes, req.submitted_by, existing["submission_id"])
+            "UPDATE submissions SET status = %s, current_stage = %s, notes = %s, submitted_by = %s, sheet_name = %s WHERE submission_id = %s",
+            ("Submitted", "Accountant", req.notes, req.submitted_by, sheet_name, existing["submission_id"])
         )
         submission_id = existing["submission_id"]
     else:
         write_cursor.execute(
-            "INSERT INTO submissions (engagement_id, section_id, file_id, submitted_by, status, current_stage, notes) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (engagement_id, section_id, file_id, req.submitted_by, "Submitted", "Accountant", req.notes)
+            "INSERT INTO submissions (engagement_id, section_id, file_id, sheet_name, submitted_by, status, current_stage, notes) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (engagement_id, section_id, file_id, sheet_name, req.submitted_by, "Submitted", "Accountant", req.notes)
         )
         submission_id = write_cursor.lastrowid
     db.commit()
@@ -4500,7 +4590,7 @@ def submit_workspace_for_review(workspace_id: int, req: WorkspaceSubmitRequest, 
         cursor.execute("""
             SELECT DISTINCT u.user_id FROM users u
             INNER JOIN engagement_team et ON u.user_id = et.user_id
-            WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) = 'Auditor'
+            WHERE et.engagement_id = %s AND COALESCE(NULLIF(et.role, ''), u.role) = 'Accountant'
         """, (engagement_id,))
         for row in cursor.fetchall():
             write_cursor.execute(
