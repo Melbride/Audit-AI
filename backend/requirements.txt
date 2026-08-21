@@ -11,3 +11,4 @@ pdfplumber
 python-docx
 reportlab
 phonenumbers
+groq
